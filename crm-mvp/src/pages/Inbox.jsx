@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import EmailComposer from "../components/inbox/EmailComposer";
 import {
-  Send, MessageSquare, Search, Mail, Phone, Building2, Tag,
-  ExternalLink, ChevronDown, Plus, FileText, Zap, Filter,
+  Send, MessageSquare, Mail, Phone, Building2, Tag,
+  ExternalLink, FileText, Zap,
   Smile, Paperclip, Clock, AlertCircle, CheckCircle2, Circle,
-  X, SlidersHorizontal
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,14 @@ const CONV_STATUS = {
   waiting:   { label: "Aguardando",        color: "bg-amber-400",  icon: Clock },
   responded: { label: "Respondido",        color: "bg-emerald-500",icon: CheckCircle2 },
   urgent:    { label: "Urgente",           color: "bg-red-500",    icon: AlertCircle },
+};
+
+// Derive a human-friendly status from the conversation's real data.
+// Previously this was simulated from the index, which changed on any reorder.
+const deriveConvStatus = (c) => {
+  if (c?.conv_status && CONV_STATUS[c.conv_status]) return c.conv_status;
+  if ((c?.unread_count || 0) > 0) return "unread";
+  return "responded";
 };
 
 const QUICK_TEMPLATES = [
@@ -65,91 +73,110 @@ export default function Inbox() {
   const bottomRef = useRef(null);
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
-      const convos = await base44.entities.Conversation.list("-updated_date", 100);
-      // Attach a simulated conv_status for demo
-      const enriched = convos.map((c, i) => ({
-        ...c,
-        conv_status: ["unread", "waiting", "responded", "urgent"][i % 4],
-      }));
-      setConversations(enriched);
-      setLoading(false);
+      try {
+        const convos = await base44.entities.Conversation.list("-updated_date", 100);
+        if (cancelled) return;
+        setConversations(convos || []);
+      } catch (err) {
+        console.error("Failed to load conversations:", err);
+        toast.error("Erro ao carregar as conversas.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
     load();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const selectionTokenRef = useRef(0);
   const selectConversation = async (convo) => {
+    const token = ++selectionTokenRef.current;
     setSelected(convo);
     setSelectedLead(null);
+    setMessages([]);
     setActiveChannel(convo.channel || "whatsapp");
     setEmailSubject("");
     setEmailBody("");
-    const msgs = await base44.entities.Message.filter({ conversation_id: convo.id }, "created_date", 100);
-    setMessages(msgs);
-    // Fetch lead info
-    if (convo.lead_id) {
-      const leads = await base44.entities.Lead.filter({ id: convo.lead_id });
-      if (leads.length > 0) setSelectedLead(leads[0]);
+    try {
+      const [msgs, leads] = await Promise.all([
+        base44.entities.Message.filter({ conversation_id: convo.id }, "created_date", 100),
+        convo.lead_id ? base44.entities.Lead.filter({ id: convo.lead_id }) : Promise.resolve([]),
+      ]);
+      // Drop results if a newer selection happened in the meantime.
+      if (selectionTokenRef.current !== token) return;
+      setMessages(msgs || []);
+      if ((leads || []).length > 0) setSelectedLead(leads[0]);
+    } catch (err) {
+      console.error("Failed to load conversation:", err);
+      if (selectionTokenRef.current === token) {
+        toast.error("Erro ao carregar a conversa.");
+      }
+      return;
     }
-    // Mark as read
+    // Mark as read (optimistic).
     setConversations((prev) =>
       prev.map((c) => (c.id === convo.id ? { ...c, conv_status: "responded", unread_count: 0 } : c))
     );
+    if ((convo.unread_count || 0) > 0) {
+      base44.entities.Conversation.update(convo.id, { unread_count: 0 })
+        .catch((err) => console.error("Failed to mark conversation as read:", err));
+    }
   };
 
   const sendEmail = async ({ subject, body, cc, bcc, priority }) => {
     if (!selected) return;
     const content = `Assunto: ${subject}\n${cc ? `CC: ${cc}\n` : ""}${bcc ? `BCC: ${bcc}\n` : ""}Prioridade: ${priority}\n\n${body}`;
-    const msg = await base44.entities.Message.create({
-      conversation_id: selected.id,
-      lead_id: selected.lead_id,
-      direction: "sent",
-      content,
-      channel: "email",
-    });
-    setMessages((prev) => [...prev, msg]);
-    await base44.entities.Conversation.update(selected.id, { last_message: `📩 ${subject}` });
-    setConversations((prev) =>
-      prev.map((c) => (c.id === selected.id ? { ...c, last_message: `📩 ${subject}`, updated_date: new Date().toISOString(), conv_status: "responded" } : c))
-    );
+    try {
+      const msg = await base44.entities.Message.create({
+        conversation_id: selected.id,
+        lead_id: selected.lead_id,
+        direction: "sent",
+        content,
+        channel: "email",
+      });
+      setMessages((prev) => [...prev, msg]);
+      base44.entities.Conversation.update(selected.id, { last_message: `📩 ${subject}` })
+        .catch((err) => console.error("Failed to update conversation:", err));
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selected.id ? { ...c, last_message: `📩 ${subject}`, updated_date: new Date().toISOString(), conv_status: "responded" } : c))
+      );
+    } catch (err) {
+      console.error("Failed to send email:", err);
+      toast.error("Não foi possível enviar o email.");
+    }
   };
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !selected) return;
-    const resolved = newMessage.replace("{{nome}}", selected.lead_name?.split(" ")[0] || "");
-    const msg = await base44.entities.Message.create({
-      conversation_id: selected.id,
-      lead_id: selected.lead_id,
-      direction: "sent",
-      content: resolved,
-      channel: activeChannel,
-    });
-    setMessages((prev) => [...prev, msg]);
-    await base44.entities.Conversation.update(selected.id, { last_message: resolved });
-    setConversations((prev) =>
-      prev.map((c) => (c.id === selected.id ? { ...c, last_message: resolved, updated_date: new Date().toISOString(), conv_status: "responded" } : c))
-    );
-    setNewMessage("");
-    setShowTemplates(false);
-
-    setTimeout(async () => {
-      const reply = await base44.entities.Message.create({
+    const trimmed = newMessage.trim();
+    if (!trimmed || !selected) return;
+    const resolved = trimmed.replace(/\{\{nome\}\}/g, selected.lead_name?.split(" ")[0] || "");
+    try {
+      const msg = await base44.entities.Message.create({
         conversation_id: selected.id,
         lead_id: selected.lead_id,
-        direction: "received",
-        content: "Obrigado pela mensagem! Vou analisar e retorno em breve. 👍",
-        channel: selected.channel || "whatsapp",
+        direction: "sent",
+        content: resolved,
+        channel: activeChannel,
       });
-      setMessages((prev) => [...prev, reply]);
+      setMessages((prev) => [...prev, msg]);
+      setNewMessage("");
+      setShowTemplates(false);
+      // Best-effort conversation update; if it fails the message was still sent.
+      base44.entities.Conversation.update(selected.id, { last_message: resolved })
+        .catch((err) => console.error("Failed to update conversation last_message:", err));
       setConversations((prev) =>
-        prev.map((c) => (c.id === selected.id ? { ...c, conv_status: "waiting" } : c))
+        prev.map((c) => (c.id === selected.id ? { ...c, last_message: resolved, updated_date: new Date().toISOString(), conv_status: "responded" } : c))
       );
-      toast.info("Nova mensagem recebida (simulado)");
-    }, 2000);
+    } catch (err) {
+      console.error("Failed to send message:", err);
+      toast.error("Não foi possível enviar a mensagem.");
+    }
   };
 
   const moveStatus = async (newStatus) => {
@@ -168,19 +195,20 @@ export default function Inbox() {
   };
 
   const counts = {
-    unread: conversations.filter((c) => c.conv_status === "unread" || c.unread_count > 0).length,
-    open: conversations.filter((c) => c.conv_status === "waiting" || c.conv_status === "unread").length,
+    unread: conversations.filter((c) => deriveConvStatus(c) === "unread" || (c.unread_count || 0) > 0).length,
+    open: conversations.filter((c) => ["waiting", "unread"].includes(deriveConvStatus(c))).length,
     all: conversations.length,
   };
 
   const filteredConvos = conversations.filter((c) => {
+    const status = deriveConvStatus(c);
     const matchSearch = c.lead_name?.toLowerCase().includes(search.toLowerCase());
     const matchChannel = filterChannel === "all" || c.channel === filterChannel;
-    const matchStatus = filterStatus === "all" || c.conv_status === filterStatus;
+    const matchStatus = filterStatus === "all" || status === filterStatus;
     const matchTab =
       activeTab === "all" ? true :
-      activeTab === "unread" ? (c.conv_status === "unread" || c.unread_count > 0) :
-      activeTab === "open" ? (c.conv_status === "waiting" || c.conv_status === "unread") :
+      activeTab === "unread" ? (status === "unread" || (c.unread_count || 0) > 0) :
+      activeTab === "open" ? (["waiting", "unread"].includes(status)) :
       true;
     return matchSearch && matchChannel && matchStatus && matchTab;
   }).sort((a, b) => {
@@ -277,7 +305,9 @@ export default function Inbox() {
           )}
           {filteredConvos.map((convo) => {
             const ch = CHANNEL_CONFIG[convo.channel] || CHANNEL_CONFIG.whatsapp;
-            const cs = CONV_STATUS[convo.conv_status] || CONV_STATUS.responded;
+            const convStatus = deriveConvStatus(convo);
+            const cs = CONV_STATUS[convStatus] || CONV_STATUS.responded;
+            const isUnread = convStatus === "unread" || (convo.unread_count || 0) > 0;
             const isActive = selected?.id === convo.id;
             return (
               <button
@@ -285,7 +315,7 @@ export default function Inbox() {
                 onClick={() => selectConversation(convo)}
                 className={`w-full text-left p-3.5 border-b border-border hover:bg-muted/50 transition-colors ${
                   isActive ? "bg-primary/5 border-l-2 border-l-primary" :
-                  (convo.conv_status === "unread" || convo.unread_count > 0) ? "bg-blue-500/5" : ""
+                  isUnread ? "bg-blue-500/5" : ""
                 }`}
               >
                 <div className="flex items-start gap-2.5">
@@ -297,7 +327,7 @@ export default function Inbox() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1">
-                      <p className={`text-sm truncate ${(convo.conv_status === "unread" || convo.unread_count > 0) ? "font-bold" : "font-medium"}`}>{convo.lead_name}</p>
+                      <p className={`text-sm truncate ${isUnread ? "font-bold" : "font-medium"}`}>{convo.lead_name}</p>
                       <span className="text-[10px] text-muted-foreground shrink-0">{moment(convo.updated_date).fromNow()}</span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">

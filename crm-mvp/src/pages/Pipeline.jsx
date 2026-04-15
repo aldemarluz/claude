@@ -60,10 +60,18 @@ export default function Pipeline() {
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => v && v !== "all").length;
 
   const handleQuickAction = async (lead, deal_status) => {
+    const previousDealStatus = lead.deal_status;
     setLeads((prev) => prev.map((l) => l.id === lead.id ? { ...l, deal_status } : l));
-    await base44.entities.Lead.update(lead.id, { deal_status });
-    const labels = { ganho: "Ganho 🏆", perdido: "Perdido", abandonado: "Abandonado" };
-    toast.success(`Lead marcado como ${labels[deal_status]}`);
+    try {
+      await base44.entities.Lead.update(lead.id, { deal_status });
+      const labels = { ganho: "Ganho 🏆", perdido: "Perdido", abandonado: "Abandonado" };
+      toast.success(`Lead marcado como ${labels[deal_status] || deal_status}`);
+    } catch (err) {
+      console.error("Failed to update lead deal_status:", err);
+      // Rollback the optimistic update.
+      setLeads((prev) => prev.map((l) => l.id === lead.id ? { ...l, deal_status: previousDealStatus } : l));
+      toast.error("Não foi possível atualizar o lead. Tente novamente.");
+    }
   };
 
   const handleLeadUpdate = (updated) => {
@@ -72,57 +80,119 @@ export default function Pipeline() {
   };
 
   const loadAll = async () => {
-    const wsId = await getWorkspaceId();
-    const [leadsData, pipelinesData] = await Promise.all([
-      wsId ? base44.entities.Lead.filter({ account_id: wsId }, "-created_date", 500) : [],
-      wsId ? base44.entities.PipelineConfig.filter({ workspace_id: wsId }) : base44.entities.PipelineConfig.list(),
-    ]);
-    setLeads(leadsData);
-    setPipelines(pipelinesData);
-    const def = pipelinesData.find(p => p.is_default) || pipelinesData[0] || null;
-    setActivePipeline(def);
-    setLoading(false);
+    setLoading(true);
+    try {
+      const wsId = await getWorkspaceId();
+      if (!wsId) {
+        setLeads([]);
+        setPipelines([]);
+        setActivePipeline(null);
+        return;
+      }
+      const [leadsData, pipelinesData] = await Promise.all([
+        base44.entities.Lead.filter({ account_id: wsId }, "-created_date", 500),
+        base44.entities.PipelineConfig.filter({ workspace_id: wsId }),
+      ]);
+      setLeads(leadsData || []);
+      setPipelines(pipelinesData || []);
+      const def = (pipelinesData || []).find(p => p.is_default) || (pipelinesData || [])[0] || null;
+      setActivePipeline(def);
+    } catch (err) {
+      console.error("Failed to load pipeline data:", err);
+      toast.error("Erro ao carregar o pipeline.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { loadAll(); }, []);
 
   const onDragEnd = async (result) => {
     if (!result.destination) return;
-    const { draggableId, destination } = result;
+    const { draggableId, source, destination } = result;
+    // Same column, same position — nothing to do.
+    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+
     const newStatus = destination.droppableId;
     const lead = leads.find((l) => l.id === draggableId);
-    if (!lead || lead.status === newStatus) return;
+    if (!lead) return;
+
+    const previousStatus = lead.status;
+    if (previousStatus === newStatus) return;
+
+    // Optimistic update.
     setLeads((prev) => prev.map((l) => (l.id === draggableId ? { ...l, status: newStatus } : l)));
-    await base44.entities.Lead.update(draggableId, { status: newStatus });
-    await base44.entities.Interaction.create({
-      lead_id: draggableId, type: "status_change",
-      content: `Status alterado para ${newStatus}`,
-      from_status: lead.status, to_status: newStatus,
-    });
+    try {
+      await base44.entities.Lead.update(draggableId, { status: newStatus });
+      // Log the status change as an interaction, but don't fail the UI if this
+      // call fails — the main update already succeeded.
+      base44.entities.Interaction.create({
+        lead_id: draggableId,
+        type: "status_change",
+        content: `Status alterado para ${newStatus}`,
+        from_status: previousStatus,
+        to_status: newStatus,
+      }).catch((err) => console.error("Failed to log status change interaction:", err));
+    } catch (err) {
+      console.error("Failed to update lead status:", err);
+      setLeads((prev) => prev.map((l) => (l.id === draggableId ? { ...l, status: previousStatus } : l)));
+      toast.error("Não foi possível mover o lead. Tente novamente.");
+    }
   };
 
   const handleAddLead = async (form) => {
     const accountId = await getWorkspaceId();
+    if (!accountId) {
+      toast.error("Não foi possível identificar sua conta. Recarregue a página.");
+      return;
+    }
     const firstStageKey = stages[0]?.key || "novo";
-    const newLead = await base44.entities.Lead.create({ ...form, account_id: accountId, status: form.status || firstStageKey });
-    setLeads((prev) => [newLead, ...prev]);
-    await base44.entities.Interaction.create({ lead_id: newLead.id, type: "note", content: "Lead criado" });
     try {
-      const me = await base44.auth.me();
-      const list = await base44.entities.OnboardingProgress.filter({ user_id: me.id });
-      if (list.length > 0 && !list[0].step_first_lead_created) {
-        await base44.entities.OnboardingProgress.update(list[0].id, { step_first_lead_created: true });
-      }
-    } catch (_) {}
+      const newLead = await base44.entities.Lead.create({
+        ...form,
+        account_id: accountId,
+        status: form.status || firstStageKey,
+      });
+      setLeads((prev) => [newLead, ...prev]);
+      // Best-effort audit trail & onboarding progress — don't block the UI.
+      base44.entities.Interaction.create({ lead_id: newLead.id, type: "note", content: "Lead criado" })
+        .catch((err) => console.error("Failed to create 'lead created' interaction:", err));
+      (async () => {
+        try {
+          const me = await base44.auth.me();
+          const list = await base44.entities.OnboardingProgress.filter({ user_id: me.id });
+          if (list.length > 0 && !list[0].step_first_lead_created) {
+            await base44.entities.OnboardingProgress.update(list[0].id, { step_first_lead_created: true });
+          }
+        } catch (err) {
+          console.error("Failed to update onboarding progress:", err);
+        }
+      })();
+    } catch (err) {
+      console.error("Failed to create lead:", err);
+      toast.error("Não foi possível criar o lead. Tente novamente.");
+    }
   };
 
   const handleSetDefault = async (p) => {
-    await Promise.all(pipelines.map(pl =>
-      base44.entities.PipelineConfig.update(pl.id, { is_default: pl.id === p.id })
-    ));
+    const previous = pipelines;
+    // Only update pipelines whose is_default flag actually changes.
+    const toUpdate = pipelines.filter(pl => Boolean(pl.is_default) !== (pl.id === p.id));
+    // Optimistic update.
     setPipelines(prev => prev.map(pl => ({ ...pl, is_default: pl.id === p.id })));
     setActivePipeline(p);
-    toast.success(`"${p.name}" definido como padrão`);
+    try {
+      await Promise.all(toUpdate.map(pl =>
+        base44.entities.PipelineConfig.update(pl.id, { is_default: pl.id === p.id })
+      ));
+      toast.success(`"${p.name}" definido como padrão`);
+    } catch (err) {
+      console.error("Failed to set default pipeline:", err);
+      setPipelines(previous);
+      const prevDefault = previous.find(pl => pl.is_default) || previous[0] || null;
+      setActivePipeline(prevDefault);
+      toast.error("Não foi possível definir o pipeline padrão.");
+    }
   };
 
   if (loading) {

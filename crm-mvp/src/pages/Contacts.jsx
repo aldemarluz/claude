@@ -15,6 +15,10 @@ const CONTACT_STATUSES = ["ativo", "inativo", "prospect"];
 const emptyContact = { name: "", email: "", phone: "", company_name: "", status: "ativo", tags: [], notes: "", whatsapp_id: "", origin: "", last_contact: "" };
 const emptyCompany = { name: "", cnpj: "", segment: "", website: "", notes: "" };
 
+// Basic email validation. Permissive on purpose; server-side remains authoritative.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (v) => typeof v === "string" && EMAIL_REGEX.test(v.trim());
+
 export default function Contacts() {
   const [activeTab, setActiveTab] = useState("contacts");
   const [contacts, setContacts] = useState([]);
@@ -35,19 +39,28 @@ export default function Contacts() {
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = async () => {
-    const accountId = await getWorkspaceId();
-    let [c, comp] = await Promise.all([
-      base44.entities.Contact.list("-created_date", 500),
-      base44.entities.Company.list("-created_date", 200),
-    ]);
-    // Filter by workspace_id or account_id if available
-    if (accountId) {
-      c = c.filter(x => x.workspace_id === accountId || x.account_id === accountId);
-      comp = comp.filter(x => x.workspace_id === accountId || x.account_id === accountId);
+    setLoading(true);
+    try {
+      const accountId = await getWorkspaceId();
+      if (!accountId) {
+        setContacts([]);
+        setCompanies([]);
+        return;
+      }
+      // Filter server-side by account_id to avoid leaking other tenants' data
+      // (previous client-side filter would leak if the list was ever truncated).
+      const [c, comp] = await Promise.all([
+        base44.entities.Contact.filter({ account_id: accountId }, "-created_date", 500),
+        base44.entities.Company.filter({ account_id: accountId }, "-created_date", 200),
+      ]);
+      setContacts(c || []);
+      setCompanies(comp || []);
+    } catch (err) {
+      console.error("Failed to load contacts/companies:", err);
+      toast.error("Erro ao carregar contatos.");
+    } finally {
+      setLoading(false);
     }
-    setContacts(c);
-    setCompanies(comp);
-    setLoading(false);
   };
 
   const filtered = contacts.filter(c =>
@@ -61,24 +74,47 @@ export default function Contacts() {
   const openEdit = (c) => { setEditingContact(c); setContactForm({ ...c }); setTagInput(""); setShowContactDialog(true); };
 
   const saveContact = async () => {
-    if (!contactForm.name || !contactForm.email) { toast.error("Nome e email são obrigatórios"); return; }
-    const accountId = await getWorkspaceId();
-    if (editingContact) {
-      const u = await base44.entities.Contact.update(editingContact.id, contactForm);
-      setContacts(p => p.map(c => c.id === editingContact.id ? u : c));
-      toast.success("Contato atualizado");
-    } else {
-      const created = await base44.entities.Contact.create({ ...contactForm, account_id: accountId });
-      setContacts(p => [created, ...p]);
-      toast.success("Contato criado");
+    if (!contactForm.name?.trim() || !contactForm.email?.trim()) {
+      toast.error("Nome e email são obrigatórios");
+      return;
     }
-    setShowContactDialog(false);
+    if (!isValidEmail(contactForm.email)) {
+      toast.error("Email inválido");
+      return;
+    }
+    try {
+      if (editingContact) {
+        const u = await base44.entities.Contact.update(editingContact.id, contactForm);
+        setContacts(p => p.map(c => c.id === editingContact.id ? u : c));
+        toast.success("Contato atualizado");
+      } else {
+        const accountId = await getWorkspaceId();
+        if (!accountId) {
+          toast.error("Não foi possível identificar sua conta.");
+          return;
+        }
+        const created = await base44.entities.Contact.create({ ...contactForm, account_id: accountId });
+        setContacts(p => [created, ...p]);
+        toast.success("Contato criado");
+      }
+      setShowContactDialog(false);
+    } catch (err) {
+      console.error("Failed to save contact:", err);
+      toast.error("Não foi possível salvar o contato.");
+    }
   };
 
   const deleteContact = async (id) => {
-    await base44.entities.Contact.delete(id);
-    setContacts(p => p.filter(c => c.id !== id));
-    toast.success("Contato removido");
+    if (!window.confirm("Tem certeza que deseja remover este contato?")) return;
+    try {
+      await base44.entities.Contact.delete(id);
+      setContacts(p => p.filter(c => c.id !== id));
+      setSelected(p => p.filter(x => x !== id));
+      toast.success("Contato removido");
+    } catch (err) {
+      console.error("Failed to delete contact:", err);
+      toast.error("Não foi possível remover o contato.");
+    }
   };
 
   const addTag = () => {
@@ -97,15 +133,28 @@ export default function Contacts() {
   };
 
   const bulkAddTag = async () => {
-    if (!bulkTag.trim() || !selected.length) return;
-    for (const id of selected) {
-      const c = contacts.find(x => x.id === id);
-      if (c) await base44.entities.Contact.update(id, { tags: [...new Set([...(c.tags || []), bulkTag.trim()])] });
+    const tag = bulkTag.trim();
+    if (!tag || !selected.length) return;
+
+    // Parallelize updates; run concurrently instead of sequentially.
+    const updates = selected
+      .map(id => contacts.find(x => x.id === id))
+      .filter(Boolean)
+      .map(c => base44.entities.Contact.update(c.id, {
+        tags: [...new Set([...(c.tags || []), tag])],
+      }));
+
+    try {
+      await Promise.all(updates);
+      await loadAll();
+      setBulkTag("");
+      setSelected([]);
+      toast.success(`Tag "${tag}" adicionada em ${updates.length} contato(s)`);
+    } catch (err) {
+      console.error("Failed to apply bulk tag:", err);
+      toast.error("Erro ao aplicar tag em massa. Alguns contatos podem não ter sido atualizados.");
+      await loadAll();
     }
-    await loadAll();
-    setBulkTag("");
-    setSelected([]);
-    toast.success("Tag adicionada em massa");
   };
 
   // CSV Export
@@ -119,24 +168,81 @@ export default function Contacts() {
     URL.revokeObjectURL(url);
   };
 
-  // CSV Import
+  // CSV Import — minimal RFC4180-aware parser (handles quoted fields with commas).
+  const parseCSVLine = (line) => {
+    const out = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+        else if (ch === '"') { inQuotes = false; }
+        else { cur += ch; }
+      } else {
+        if (ch === ',') { out.push(cur); cur = ""; }
+        else if (ch === '"') { inQuotes = true; }
+        else { cur += ch; }
+      }
+    }
+    out.push(cur);
+    return out.map(v => v.trim());
+  };
+
   const importCSV = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const lines = evt.target.result.split("\n").slice(1).filter(l => l.trim());
-      let count = 0;
-      for (const line of lines) {
-        const p = line.split(",").map(x => x.replace(/^"|"$/g, "").trim());
-        if (p[0] && p[1]) {
-          await base44.entities.Contact.create({ name: p[0], email: p[1], phone: p[2] || "", company_name: p[3] || "", status: p[4] || "ativo", tags: p[5] ? p[5].split(";").filter(Boolean) : [] });
-          count++;
+      try {
+        const accountId = await getWorkspaceId();
+        if (!accountId) {
+          toast.error("Não foi possível identificar sua conta.");
+          return;
         }
+        // Strip UTF-8 BOM if present.
+        const text = String(evt.target.result || "").replace(/^\uFEFF/, "");
+        const rows = text.split(/\r?\n/).slice(1).filter(l => l.trim());
+        const toCreate = [];
+        const invalid = [];
+        for (const line of rows) {
+          const p = parseCSVLine(line);
+          const name = p[0];
+          const email = p[1];
+          if (!name || !email) { invalid.push(line); continue; }
+          if (!isValidEmail(email)) { invalid.push(line); continue; }
+          toCreate.push({
+            name,
+            email,
+            phone: p[2] || "",
+            company_name: p[3] || "",
+            status: CONTACT_STATUSES.includes(p[4]) ? p[4] : "ativo",
+            tags: p[5] ? p[5].split(";").filter(Boolean) : [],
+            account_id: accountId,
+          });
+        }
+        // Create in parallel (chunked to avoid hammering the API).
+        const CHUNK = 10;
+        let created = 0;
+        for (let i = 0; i < toCreate.length; i += CHUNK) {
+          const chunk = toCreate.slice(i, i + CHUNK);
+          const results = await Promise.allSettled(
+            chunk.map(c => base44.entities.Contact.create(c))
+          );
+          created += results.filter(r => r.status === "fulfilled").length;
+        }
+        await loadAll();
+        if (invalid.length) {
+          toast.success(`${created} contatos importados. ${invalid.length} linha(s) ignorada(s).`);
+        } else {
+          toast.success(`${created} contatos importados`);
+        }
+      } catch (err) {
+        console.error("CSV import failed:", err);
+        toast.error("Erro ao importar CSV.");
       }
-      await loadAll();
-      toast.success(`${count} contatos importados`);
     };
+    reader.onerror = () => toast.error("Não foi possível ler o arquivo.");
     reader.readAsText(file);
     e.target.value = "";
   };
@@ -146,24 +252,39 @@ export default function Contacts() {
   const openEditCompany = (c) => { setEditingCompany(c); setCompanyForm({ ...c }); setShowCompanyDialog(true); };
 
   const saveCompany = async () => {
-    if (!companyForm.name) { toast.error("Nome é obrigatório"); return; }
-    const accountId = await getWorkspaceId();
-    if (editingCompany) {
-      const u = await base44.entities.Company.update(editingCompany.id, companyForm);
-      setCompanies(p => p.map(c => c.id === editingCompany.id ? u : c));
-      toast.success("Empresa atualizada");
-    } else {
-      const created = await base44.entities.Company.create({ ...companyForm, account_id: accountId });
-      setCompanies(p => [created, ...p]);
-      toast.success("Empresa criada");
+    if (!companyForm.name?.trim()) { toast.error("Nome é obrigatório"); return; }
+    try {
+      if (editingCompany) {
+        const u = await base44.entities.Company.update(editingCompany.id, companyForm);
+        setCompanies(p => p.map(c => c.id === editingCompany.id ? u : c));
+        toast.success("Empresa atualizada");
+      } else {
+        const accountId = await getWorkspaceId();
+        if (!accountId) {
+          toast.error("Não foi possível identificar sua conta.");
+          return;
+        }
+        const created = await base44.entities.Company.create({ ...companyForm, account_id: accountId });
+        setCompanies(p => [created, ...p]);
+        toast.success("Empresa criada");
+      }
+      setShowCompanyDialog(false);
+    } catch (err) {
+      console.error("Failed to save company:", err);
+      toast.error("Não foi possível salvar a empresa.");
     }
-    setShowCompanyDialog(false);
   };
 
   const deleteCompany = async (id) => {
-    await base44.entities.Company.delete(id);
-    setCompanies(p => p.filter(c => c.id !== id));
-    toast.success("Empresa removida");
+    if (!window.confirm("Tem certeza que deseja remover esta empresa?")) return;
+    try {
+      await base44.entities.Company.delete(id);
+      setCompanies(p => p.filter(c => c.id !== id));
+      toast.success("Empresa removida");
+    } catch (err) {
+      console.error("Failed to delete company:", err);
+      toast.error("Não foi possível remover a empresa.");
+    }
   };
 
   if (loading) return (
@@ -348,20 +469,26 @@ export default function Contacts() {
               </div>
               <div className="space-y-1.5 col-span-2">
                <Label>Empresa</Label>
-               <Select value={contactForm.company_name || ""} onValueChange={v => setContactForm(f => ({ ...f, company_name: v }))}>
+               <Select
+                 value={contactForm.company_name || "__none__"}
+                 onValueChange={v => setContactForm(f => ({ ...f, company_name: v === "__none__" ? "" : v }))}
+               >
                  <SelectTrigger><SelectValue placeholder="Selecionar empresa" /></SelectTrigger>
                  <SelectContent>
-                   <SelectItem value={null}>Sem empresa</SelectItem>
+                   <SelectItem value="__none__">Sem empresa</SelectItem>
                    {companies.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
                  </SelectContent>
                </Select>
               </div>
               <div className="space-y-1.5 col-span-2">
                <Label>Origem</Label>
-               <Select value={contactForm.origin || ""} onValueChange={v => setContactForm(f => ({ ...f, origin: v }))}>
+               <Select
+                 value={contactForm.origin || "Manual"}
+                 onValueChange={v => setContactForm(f => ({ ...f, origin: v === "Manual" ? "" : v }))}
+               >
                  <SelectTrigger><SelectValue placeholder="Selecionar origem" /></SelectTrigger>
                  <SelectContent>
-                   <SelectItem value={null}>Manual</SelectItem>
+                   <SelectItem value="Manual">Manual</SelectItem>
                    <SelectItem value="WhatsApp">WhatsApp</SelectItem>
                    <SelectItem value="Email">Email</SelectItem>
                    <SelectItem value="Formulário">Formulário</SelectItem>

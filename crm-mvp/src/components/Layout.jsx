@@ -1,27 +1,33 @@
-import { Outlet, Link, useLocation } from "react-router-dom";
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import BillingBanner from "./BillingBanner";
 import {
   LayoutDashboard,
   Users,
   MessageSquare,
   Zap,
-  FileText,
   Settings,
   ChevronLeft,
   ChevronRight,
-  Search,
-  Bell,
   UserCircle,
   TrendingUp,
   Briefcase,
-  Building2,
-  Smartphone,
   Wifi,
+  LogOut,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/lib/AuthContext";
+import { base44 } from "@/api/base44Client";
+import { getWorkspaceId } from "@/lib/workspace";
 
 const navGroups = [
   {
@@ -41,7 +47,7 @@ const navGroups = [
   {
     label: "Comunicação",
     items: [
-      { path: "/unified-inbox", icon: MessageSquare, label: "Inbox Unificado", badge: true },
+      { path: "/unified-inbox", icon: MessageSquare, label: "Inbox Unificado", showUnreadBadge: true },
       { path: "/whatsapp-channels", icon: Wifi, label: "Canais WhatsApp" },
       { path: "/marketing", icon: TrendingUp, label: "Marketing" },
       { path: "/automations", icon: Zap, label: "Automações" },
@@ -55,9 +61,47 @@ const navGroups = [
   },
 ];
 
+const getInitials = (nameOrEmail) => {
+  if (!nameOrEmail) return "U";
+  const source = String(nameOrEmail).trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+};
+
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+
+  // Load the unread-conversation count from Base44 once. This replaces the
+  // hardcoded "3" badge. Consumers that mark conversations as read should
+  // refresh via a shared store in a future iteration.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUnread() {
+      try {
+        const accountId = await getWorkspaceId();
+        if (!accountId) return;
+        const convs = await base44.entities.WhatsAppConversation.filter(
+          { workspace_id: accountId },
+          "-atualizado_em",
+          200
+        );
+        if (cancelled) return;
+        setUnreadCount((convs || []).filter((c) => c.nao_lido).length);
+      } catch (err) {
+        console.error("Failed to load unread count:", err);
+      }
+    }
+    loadUnread();
+    return () => { cancelled = true; };
+  }, []);
+
+  const displayName = user?.full_name || user?.email || "Conta";
+  const initials = getInitials(user?.full_name || user?.email);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -87,7 +131,7 @@ export default function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-4 px-3 overflow-y-auto">
+        <nav className="flex-1 py-4 px-3 overflow-y-auto" aria-label="Navegação principal">
           {navGroups.map((group) => (
             <div key={group.label} className="mb-4">
               {!collapsed && (
@@ -98,10 +142,12 @@ export default function Layout() {
                   const isActive = item.path === "/"
                     ? location.pathname === "/"
                     : location.pathname.startsWith(item.path);
+                  const showBadge = item.showUnreadBadge && unreadCount > 0;
                   return (
                     <Link
                       key={item.path}
                       to={item.path}
+                      aria-current={isActive ? "page" : undefined}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group ${
                         isActive
                           ? "bg-sidebar-accent text-sidebar-primary"
@@ -112,9 +158,9 @@ export default function Layout() {
                       {!collapsed && (
                         <span className="text-sm font-medium truncate">{item.label}</span>
                       )}
-                      {!collapsed && item.badge && (
+                      {!collapsed && showBadge && (
                         <Badge className="ml-auto bg-primary/20 text-primary border-0 text-xs px-1.5">
-                          3
+                          {unreadCount > 99 ? "99+" : unreadCount}
                         </Badge>
                       )}
                     </Link>
@@ -131,6 +177,7 @@ export default function Layout() {
             variant="ghost"
             size="sm"
             onClick={() => setCollapsed(!collapsed)}
+            aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
             className="w-full text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
           >
             {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -142,21 +189,35 @@ export default function Layout() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
         <header className="h-16 border-b border-border bg-card flex items-center justify-between px-6 shrink-0">
-          <div className="relative w-80">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar leads, conversas..."
-              className="pl-10 bg-muted/50 border-0 focus-visible:ring-1"
-            />
-          </div>
+          <div className="flex-1" />
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="w-5 h-5 text-muted-foreground" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full" />
-            </Button>
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-              <span className="text-primary text-sm font-semibold">U</span>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors"
+                  aria-label="Menu do usuário"
+                >
+                  <span className="text-primary text-sm font-semibold">{initials}</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-sm font-medium truncate">{displayName}</p>
+                    {user?.email && (
+                      <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                    )}
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate("/settings")}>
+                  <Settings className="w-4 h-4 mr-2" /> Configurações
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => logout?.()}>
+                  <LogOut className="w-4 h-4 mr-2" /> Sair
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 

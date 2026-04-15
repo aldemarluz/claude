@@ -18,29 +18,34 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
-      const accountId = await getWorkspaceId();
-      const [data, channels] = await Promise.all([
-        accountId ? base44.entities.Lead.filter({ account_id: accountId }, "-created_date", 200) : [],
-        accountId ? base44.entities.WhatsAppChannel.filter({ workspace_id: accountId }) : [],
-      ]);
-      setLeads(data);
-      setWaChannels(channels);
-
-      // WA metrics
-      if (accountId) {
+      try {
+        const accountId = await getWorkspaceId();
+        if (!accountId) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
         const today = new Date(); today.setHours(0, 0, 0, 0);
-        const [convs, msgs] = await Promise.all([
+        const [data, channels, convs, msgs] = await Promise.all([
+          base44.entities.Lead.filter({ account_id: accountId }, "-created_date", 200),
+          base44.entities.WhatsAppChannel.filter({ workspace_id: accountId }),
           base44.entities.WhatsAppConversation.filter({ workspace_id: accountId }, "-atualizado_em", 200),
           base44.entities.WhatsAppMessage.filter({ workspace_id: accountId }, "-timestamp", 200),
         ]);
-        setWaUnread(convs.filter(c => c.nao_lido).length);
-        setWaMsgsToday(msgs.filter(m => m.timestamp && new Date(m.timestamp) >= today).length);
+        if (cancelled) return;
+        setLeads(data || []);
+        setWaChannels(channels || []);
+        setWaUnread((convs || []).filter(c => c.nao_lido).length);
+        setWaMsgsToday((msgs || []).filter(m => m.timestamp && new Date(m.timestamp) >= today).length);
+      } catch (err) {
+        console.error("Failed to load dashboard:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      setLoading(false);
     }
     load();
+    return () => { cancelled = true; };
   }, []);
 
   const totalLeads = leads.length;
@@ -67,13 +72,12 @@ export default function Dashboard() {
 
       {/* CRM Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard title="Total de Leads" value={totalLeads} change={12} icon={Users} />
-        <MetricCard title="Conversões" value={closedLeads} change={8} icon={Target} />
-        <MetricCard title="Taxa de Conversão" value={`${conversionRate}%`} change={5} icon={TrendingUp} />
+        <MetricCard title="Total de Leads" value={totalLeads} icon={Users} />
+        <MetricCard title="Conversões" value={closedLeads} icon={Target} />
+        <MetricCard title="Taxa de Conversão" value={`${conversionRate}%`} icon={TrendingUp} />
         <MetricCard
           title="Receita Estimada"
           value={`R$ ${revenue.toLocaleString("pt-BR")}`}
-          change={15}
           icon={DollarSign}
         />
       </div>

@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
-import { X, Trophy, XCircle, Archive, DollarSign, Mail, Phone, Building2, Tag, Clock, MessageSquare, FileText, ChevronRight } from "lucide-react";
+import { X, Trophy, XCircle, Archive, DollarSign, Mail, Phone, Building2, Clock, MessageSquare, FileText, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { STATUS_CONFIG, STATUS_LIST } from "@/lib/statusConfig";
+import { STATUS_LIST } from "@/lib/statusConfig";
 import moment from "moment";
 import { toast } from "sonner";
 
@@ -31,53 +31,100 @@ export default function LeadModal({ lead, onClose, onUpdate }) {
   const [localLead, setLocalLead] = useState(lead);
 
   useEffect(() => {
+    let cancelled = false;
     setLocalLead(lead);
+    setInteractions([]);
     base44.entities.Interaction.filter({ lead_id: lead.id }, "-created_date", 50)
-      .then(setInteractions);
-  }, [lead]);
+      .then((items) => { if (!cancelled) setInteractions(items || []); })
+      .catch((err) => {
+        console.error("Failed to load interactions:", err);
+        if (!cancelled) toast.error("Erro ao carregar o histórico.");
+      });
+    return () => { cancelled = true; };
+  }, [lead?.id]);
 
   const updateLead = async (patch) => {
+    const previous = localLead;
     const updated = { ...localLead, ...patch };
     setLocalLead(updated);
-    await base44.entities.Lead.update(lead.id, patch);
-    onUpdate(updated);
+    try {
+      const saved = await base44.entities.Lead.update(lead.id, patch);
+      // Prefer the server's version if it returns one.
+      const next = saved && typeof saved === "object" ? { ...updated, ...saved } : updated;
+      setLocalLead(next);
+      onUpdate?.(next);
+      return next;
+    } catch (err) {
+      console.error("Failed to update lead:", err);
+      setLocalLead(previous);
+      toast.error("Não foi possível atualizar o lead.");
+      throw err;
+    }
   };
 
   const setDealStatus = async (deal_status) => {
-    await updateLead({ deal_status });
-    const labels = { ganho: "Ganho 🏆", perdido: "Perdido", abandonado: "Abandonado" };
-    toast.success(`Lead marcado como ${labels[deal_status] || deal_status}`);
-    if (deal_status !== "aberto") {
-      await base44.entities.Interaction.create({
-        lead_id: lead.id,
-        type: "status_change",
-        content: `Lead marcado como ${DEAL_STATUS[deal_status]?.label}`,
-      });
-      setInteractions((prev) => [{ id: Date.now(), type: "status_change", content: `Lead marcado como ${DEAL_STATUS[deal_status]?.label}`, created_date: new Date().toISOString() }, ...prev]);
+    try {
+      await updateLead({ deal_status });
+      const labels = { ganho: "Ganho 🏆", perdido: "Perdido", abandonado: "Abandonado" };
+      toast.success(`Lead marcado como ${labels[deal_status] || deal_status}`);
+      if (deal_status !== "aberto") {
+        try {
+          const created = await base44.entities.Interaction.create({
+            lead_id: lead.id,
+            type: "status_change",
+            content: `Lead marcado como ${DEAL_STATUS[deal_status]?.label}`,
+          });
+          setInteractions((prev) => [created || {
+            id: `tmp-${Date.now()}`,
+            type: "status_change",
+            content: `Lead marcado como ${DEAL_STATUS[deal_status]?.label}`,
+            created_date: new Date().toISOString(),
+          }, ...prev]);
+        } catch (err) {
+          console.error("Failed to log status change interaction:", err);
+        }
+      }
+    } catch (_err) {
+      // updateLead already toasted.
     }
   };
 
   const addNote = async () => {
-    if (!note.trim()) return;
+    const trimmed = note.trim();
+    if (!trimmed) return;
     setSaving(true);
-    const interaction = await base44.entities.Interaction.create({
-      lead_id: lead.id,
-      type: "note",
-      content: note.trim(),
-    });
-    setInteractions((prev) => [interaction, ...prev]);
-    await updateLead({ notes: note.trim() });
-    setNote("");
-    setSaving(false);
-    toast.success("Nota salva");
+    try {
+      const interaction = await base44.entities.Interaction.create({
+        lead_id: lead.id,
+        type: "note",
+        content: trimmed,
+      });
+      setInteractions((prev) => [interaction, ...prev]);
+      // Appending to existing notes is less destructive than overwriting.
+      const existingNotes = localLead.notes?.trim();
+      const newNotes = existingNotes ? `${existingNotes}\n---\n${trimmed}` : trimmed;
+      await updateLead({ notes: newNotes });
+      setNote("");
+      toast.success("Nota salva");
+    } catch (err) {
+      console.error("Failed to save note:", err);
+      toast.error("Não foi possível salvar a nota.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const ds = DEAL_STATUS[localLead.deal_status || "aberto"];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lead-modal-title"
+    >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
 
       {/* Modal */}
       <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -88,7 +135,7 @@ export default function LeadModal({ lead, onClose, onUpdate }) {
               <span className="text-primary font-bold">{localLead.name?.charAt(0)?.toUpperCase()}</span>
             </div>
             <div>
-              <h2 className="text-lg font-bold leading-tight">{localLead.name}</h2>
+              <h2 id="lead-modal-title" className="text-lg font-bold leading-tight">{localLead.name}</h2>
               {localLead.company && <p className="text-xs text-muted-foreground">{localLead.company}</p>}
             </div>
             <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${ds.color}`}>{ds.label}</span>
@@ -116,7 +163,11 @@ export default function LeadModal({ lead, onClose, onUpdate }) {
                 Reabrir
               </Button>
             )}
-            <button onClick={onClose} className="ml-2 p-1.5 rounded-lg hover:bg-muted transition-colors">
+            <button
+              onClick={onClose}
+              aria-label="Fechar"
+              className="ml-2 p-1.5 rounded-lg hover:bg-muted transition-colors"
+            >
               <X className="w-4 h-4" />
             </button>
           </div>
