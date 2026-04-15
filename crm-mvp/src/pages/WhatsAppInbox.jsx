@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
-import { Send, MessageSquare, CheckCheck, Paperclip, X } from "lucide-react";
+import { Send, MessageSquare, CheckCheck, Check, Clock, AlertTriangle, Paperclip, X } from "lucide-react";
 import MediaMessage from "@/components/whatsapp/MediaMessage";
 import AudioRecorder from "@/components/whatsapp/AudioRecorder";
 import QuickResponseSelector from "@/components/quickresponses/QuickResponseSelector";
@@ -11,6 +11,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import moment from "moment";
 import { toast } from "sonner";
+
+// Render the right send-status indicator next to outbound messages.
+function MessageStatusIcon({ status }) {
+  if (status === "pending") return <Clock className="w-3.5 h-3.5 text-slate-400 animate-pulse" aria-label="Enviando" />;
+  if (status === "falhou" || status === "failed") return <AlertTriangle className="w-3.5 h-3.5 text-red-500" aria-label="Falha" />;
+  if (status === "lido" || status === "read") return <CheckCheck className="w-3.5 h-3.5 text-blue-400" aria-label="Lido" />;
+  if (status === "entregue" || status === "delivered") return <CheckCheck className="w-3.5 h-3.5 text-slate-400" aria-label="Entregue" />;
+  if (status === "enviado" || status === "sent") return <Check className="w-3.5 h-3.5 text-slate-400" aria-label="Enviado" />;
+  return null;
+}
 
 export default function WhatsAppInbox() {
   const [conversations, setConversations] = useState([]);
@@ -118,37 +128,56 @@ export default function WhatsAppInbox() {
     const mf = mediaFile;
     setNewMessage("");
     setMediaFile(null);
+
+    // Optimistic placeholder while the server creates the real WhatsAppMessage
+    // (with status='pending' → 'enviado' or 'falhou'). When the next refresh
+    // pulls the canonical row we'll drop this temp by id.
+    const tempId = `tmp-${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      conversa_id: selectedConv.id,
+      contato_id: selectedConv.contato_id,
+      direcao: "outbound",
+      conteudo: texto || mf?.name || "",
+      media_url: mf?.url || null,
+      media_type: mf?.type || "text",
+      file_name: mf?.name || null,
+      timestamp: new Date().toISOString(),
+      status: "pending",
+      _temp: true,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === selectedConv.id
+          ? { ...c, ultima_mensagem: texto || `[${mf?.type}]`, atualizado_em: new Date().toISOString(), last_status: "pending" }
+          : c
+      )
+    );
+
     try {
-      await base44.functions.invoke("sendWhatsAppMessage", {
+      const res = await base44.functions.invoke("sendWhatsAppMessage", {
         conversation_id: selectedConv.id,
         mensagem: texto || null,
         media_url: mf?.url || null,
         media_type: mf?.type || "text",
         file_name: mf?.name || null,
       });
-      const newMsg = {
-        id: Date.now().toString(),
-        conversa_id: selectedConv.id,
-        contato_id: selectedConv.contato_id,
-        direcao: "outbound",
-        conteudo: texto || mf?.name || "",
-        media_url: mf?.url || null,
-        media_type: mf?.type || "text",
-        file_name: mf?.name || null,
-        timestamp: new Date().toISOString(),
-        status: "enviado",
-      };
-      setMessages((prev) => [...prev, newMsg]);
-      // Update only the fields that changed, preserve contato_nome and all other fields
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === selectedConv.id
-            ? { ...c, ultima_mensagem: texto || `[${mf?.type}]`, atualizado_em: new Date().toISOString() }
-            : c
-        )
+      // Replace the optimistic row with the server's view.
+      const serverStatus = res?.data?.status || "enviado";
+      const serverId = res?.data?.message_id || null;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId
+          ? { ...m, id: serverId || m.id, status: serverStatus, _temp: false }
+          : m))
       );
+      // Refresh in the background to pick up provider_message_id + canonical row.
+      refreshMessages(selectedConv.id).catch(() => null);
     } catch (err) {
-      toast.error("Erro ao enviar mensagem: " + err.message);
+      console.error("sendMessage failed:", err);
+      setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, status: "falhou", error: err?.message } : m));
+      toast.error("Erro ao enviar mensagem");
+      // Restore inputs so user can retry.
       setNewMessage(texto);
       setMediaFile(mf);
     }
@@ -277,8 +306,9 @@ export default function WhatsAppInbox() {
                           <span className="text-[10px] text-slate-400">
                             {msg.timestamp ? moment(msg.timestamp).format("HH:mm") : ""}
                           </span>
-                          {isOut && (
-                            <CheckCheck className={`w-3.5 h-3.5 ${msg.status === "lido" ? "text-blue-400" : "text-slate-400"}`} />
+                          {isOut && <MessageStatusIcon status={msg.status} />}
+                          {isOut && (msg.status === "falhou" || msg.status === "failed") && msg.error && (
+                            <span className="text-[10px] text-red-500 ml-1" title={msg.error}>falhou</span>
                           )}
                         </div>
                       </div>
@@ -318,29 +348,47 @@ export default function WhatsAppInbox() {
                 {!mediaFile ? (
                   <AudioRecorder
                     disabled={!selectedChannel || sending}
-                    onSend={(mf) => {
-                      setMediaFile(mf);
-                      // auto-send immediately for audio
-                      setSending(true);
-                      base44.functions.invoke("sendWhatsAppMessage", {
-                        conversation_id: selectedConv.id,
-                        mensagem: null,
+                    onSend={async (mf) => {
+                      // Auto-send immediately for audio with optimistic +
+                      // server-confirmed status, just like sendMessage.
+                      const tempId = `tmp-${Date.now()}`;
+                      const optimistic = {
+                        id: tempId,
+                        conversa_id: selectedConv.id,
+                        contato_id: selectedConv.contato_id,
+                        direcao: "outbound",
+                        conteudo: "",
                         media_url: mf.url,
                         media_type: "audio",
+                        media_mime: mf.mime || null,
                         file_name: mf.name,
-                      }).then(() => {
-                        setMessages((prev) => [...prev, {
-                          id: Date.now().toString(),
-                          conversa_id: selectedConv.id,
-                          direcao: "outbound",
-                          conteudo: "",
+                        timestamp: new Date().toISOString(),
+                        status: "pending",
+                        _temp: true,
+                      };
+                      setMessages((prev) => [...prev, optimistic]);
+                      setSending(true);
+                      try {
+                        const res = await base44.functions.invoke("sendWhatsAppMessage", {
+                          conversation_id: selectedConv.id,
+                          mensagem: null,
                           media_url: mf.url,
                           media_type: "audio",
-                          timestamp: new Date().toISOString(),
-                          status: "enviado",
-                        }]);
-                        setMediaFile(null);
-                      }).finally(() => setSending(false));
+                          file_name: mf.name,
+                        });
+                        const status = res?.data?.status || "enviado";
+                        const id = res?.data?.message_id || null;
+                        setMessages((prev) =>
+                          prev.map((m) => m.id === tempId ? { ...m, id: id || m.id, status, _temp: false } : m)
+                        );
+                        refreshMessages(selectedConv.id).catch(() => null);
+                      } catch (err) {
+                        console.error("audio send failed:", err);
+                        setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, status: "falhou", error: err?.message } : m));
+                        toast.error("Erro ao enviar áudio");
+                      } finally {
+                        setSending(false);
+                      }
                     }}
                   />
                 ) : null}
