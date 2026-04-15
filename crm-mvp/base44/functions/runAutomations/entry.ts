@@ -1,4 +1,4 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.26';
 
 // runAutomations: called by evolutionWebhook after saving each message
 // Checks all active AutomationRules for the workspace and executes matching ones

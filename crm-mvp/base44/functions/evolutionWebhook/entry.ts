@@ -1,4 +1,4 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.26';
 
 const timingSafeEqual = (a: string, b: string): boolean => {
   if (a.length !== b.length) return false;
