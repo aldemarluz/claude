@@ -20,7 +20,16 @@
     },
     "token": {
       "type": "string",
-      "title": "Token / API Key"
+      "title": "Token / API Key (DEPRECATED \u2014 use env var)"
+    },
+    "auth_mode": {
+      "type": "string",
+      "title": "Modo de auth",
+      "enum": [
+        "env",
+        "stored"
+      ],
+      "default": "env"
     },
     "status": {
       "type": "string",
