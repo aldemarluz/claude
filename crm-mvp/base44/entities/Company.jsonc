@@ -1,0 +1,41 @@
+{
+  "name": "Company",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "name": {
+      "type": "string",
+      "title": "Nome da Empresa"
+    },
+    "cnpj": {
+      "type": "string",
+      "title": "CNPJ"
+    },
+    "segment": {
+      "type": "string",
+      "title": "Segmento"
+    },
+    "email": {
+      "type": "string",
+      "title": "Email"
+    },
+    "phone": {
+      "type": "string",
+      "title": "Telefone"
+    },
+    "website": {
+      "type": "string",
+      "title": "Website"
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notas"
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

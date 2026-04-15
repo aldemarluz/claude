@@ -1,0 +1,36 @@
+{
+  "name": "Conversation",
+  "type": "object",
+  "properties": {
+    "lead_id": {
+      "type": "string",
+      "title": "Lead ID"
+    },
+    "lead_name": {
+      "type": "string",
+      "title": "Nome do Lead"
+    },
+    "channel": {
+      "type": "string",
+      "title": "Canal",
+      "enum": [
+        "whatsapp",
+        "email"
+      ],
+      "default": "whatsapp"
+    },
+    "last_message": {
+      "type": "string",
+      "title": "\u00daltima Mensagem"
+    },
+    "unread_count": {
+      "type": "number",
+      "title": "N\u00e3o Lidas",
+      "default": 0
+    }
+  },
+  "required": [
+    "lead_id",
+    "lead_name"
+  ]
+}

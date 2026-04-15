@@ -1,0 +1,56 @@
+{
+  "name": "User",
+  "type": "object",
+  "properties": {
+    "role": {
+      "type": "string",
+      "title": "Papel",
+      "enum": [
+        "admin",
+        "user"
+      ],
+      "default": "user"
+    },
+    "current_plan_id": {
+      "type": "string",
+      "title": "ID do Plano Atual"
+    },
+    "subscription_status": {
+      "type": "string",
+      "title": "Status da Assinatura",
+      "enum": [
+        "free",
+        "trial",
+        "active",
+        "past_due",
+        "cancelled"
+      ],
+      "default": "free"
+    },
+    "trial_end_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "T\u00e9rmino do Per\u00edodo de Teste"
+    },
+    "contacts_count": {
+      "type": "number",
+      "title": "Contatos Criados",
+      "default": 0
+    },
+    "automations_count": {
+      "type": "number",
+      "title": "Automa\u00e7\u00f5es Criadas",
+      "default": 0
+    },
+    "dispatches_count_monthly": {
+      "type": "number",
+      "title": "Disparos no M\u00eas",
+      "default": 0
+    },
+    "inbox_channels_count": {
+      "type": "number",
+      "title": "Canais de Inbox",
+      "default": 0
+    }
+  }
+}

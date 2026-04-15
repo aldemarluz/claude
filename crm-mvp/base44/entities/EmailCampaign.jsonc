@@ -1,0 +1,54 @@
+{
+  "name": "EmailCampaign",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "name": {
+      "type": "string",
+      "title": "Nome da Campanha"
+    },
+    "subject": {
+      "type": "string",
+      "title": "Assunto"
+    },
+    "content": {
+      "type": "string",
+      "title": "Conte\u00fado"
+    },
+    "target_tags": {
+      "type": "array",
+      "title": "Tags Alvo",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "rascunho",
+        "enviada",
+        "agendada"
+      ],
+      "default": "rascunho"
+    },
+    "sent_at": {
+      "type": "string",
+      "title": "Enviada em",
+      "format": "date-time"
+    },
+    "recipient_count": {
+      "type": "number",
+      "title": "Destinat\u00e1rios",
+      "default": 0
+    }
+  },
+  "required": [
+    "name",
+    "subject",
+    "content"
+  ]
+}

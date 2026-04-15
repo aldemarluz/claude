@@ -1,0 +1,44 @@
+{
+  "name": "WhatsAppContact",
+  "type": "object",
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "title": "Workspace ID"
+    },
+    "nome": {
+      "type": "string",
+      "title": "Nome"
+    },
+    "telefone": {
+      "type": "string",
+      "title": "Telefone"
+    },
+    "owner_email": {
+      "type": "string",
+      "title": "Conta Propriet\u00e1ria (email)"
+    },
+    "criado_em": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Criado em"
+    },
+    "profile_picture_url": {
+      "type": "string",
+      "title": "Foto de Perfil (URL)"
+    },
+    "profile_pic_updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Foto atualizada em"
+    },
+    "crm_contact_id": {
+      "type": "string",
+      "title": "Contact CRM ID (link)"
+    }
+  },
+  "required": [
+    "nome",
+    "telefone"
+  ]
+}

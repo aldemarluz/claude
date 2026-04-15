@@ -1,0 +1,28 @@
+{
+  "name": "UserAccount",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string",
+      "title": "Email do Usu\u00e1rio"
+    },
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "role": {
+      "type": "string",
+      "title": "Papel",
+      "enum": [
+        "owner",
+        "admin",
+        "member"
+      ],
+      "default": "owner"
+    }
+  },
+  "required": [
+    "user_email",
+    "account_id"
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "name": "WhatsAppMessage",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "conversa_id": {
+      "type": "string",
+      "title": "Conversa ID"
+    },
+    "contato_id": {
+      "type": "string",
+      "title": "Contato ID"
+    },
+    "direcao": {
+      "type": "string",
+      "title": "Dire\u00e7\u00e3o",
+      "enum": [
+        "inbound",
+        "outbound"
+      ],
+      "default": "outbound"
+    },
+    "conteudo": {
+      "type": "string",
+      "title": "Conte\u00fado"
+    },
+    "media_url": {
+      "type": "string",
+      "title": "URL da M\u00eddia"
+    },
+    "media_type": {
+      "type": "string",
+      "title": "Tipo de M\u00eddia",
+      "enum": [
+        "image",
+        "audio",
+        "video",
+        "document",
+        "text"
+      ],
+      "default": "text"
+    },
+    "file_name": {
+      "type": "string",
+      "title": "Nome do Arquivo"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Timestamp"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "enviado",
+        "entregue",
+        "lido"
+      ],
+      "default": "enviado"
+    },
+    "owner_email": {
+      "type": "string",
+      "title": "Conta Propriet\u00e1ria (email)"
+    }
+  },
+  "required": [
+    "conversa_id",
+    "direcao"
+  ]
+}

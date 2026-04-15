@@ -1,0 +1,48 @@
+{
+  "name": "OnboardingProgress",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "title": "User ID"
+    },
+    "completed": {
+      "type": "boolean",
+      "title": "Onboarding Conclu\u00eddo",
+      "default": false
+    },
+    "step_profile_completed": {
+      "type": "boolean",
+      "title": "Perfil configurado",
+      "default": false
+    },
+    "step_first_lead_created": {
+      "type": "boolean",
+      "title": "Primeiro lead criado",
+      "default": false
+    },
+    "step_channel_connected": {
+      "type": "boolean",
+      "title": "Canal conectado",
+      "default": false
+    },
+    "step_first_message_sent": {
+      "type": "boolean",
+      "title": "Primeira mensagem enviada",
+      "default": false
+    },
+    "step_automation_created": {
+      "type": "boolean",
+      "title": "Automa\u00e7\u00e3o criada",
+      "default": false
+    },
+    "current_step": {
+      "type": "number",
+      "title": "Passo atual",
+      "default": 1
+    }
+  },
+  "required": [
+    "user_id"
+  ]
+}

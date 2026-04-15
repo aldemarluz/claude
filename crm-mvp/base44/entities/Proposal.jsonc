@@ -1,0 +1,75 @@
+{
+  "name": "Proposal",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "title": {
+      "type": "string",
+      "title": "T\u00edtulo"
+    },
+    "client_name": {
+      "type": "string",
+      "title": "Nome do Cliente"
+    },
+    "contact_id": {
+      "type": "string",
+      "title": "Contato ID"
+    },
+    "lead_id": {
+      "type": "string",
+      "title": "Lead ID"
+    },
+    "value": {
+      "type": "number",
+      "title": "Valor",
+      "default": 0
+    },
+    "description": {
+      "type": "string",
+      "title": "Descri\u00e7\u00e3o"
+    },
+    "items": {
+      "type": "array",
+      "title": "Itens",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "rascunho",
+        "enviada",
+        "aceita",
+        "recusada"
+      ],
+      "default": "rascunho"
+    },
+    "accepted_at": {
+      "type": "string",
+      "title": "Aceita em",
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": "string",
+      "title": "V\u00e1lida at\u00e9",
+      "format": "date"
+    }
+  },
+  "required": [
+    "title",
+    "client_name"
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "name": "Subscription",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "title": "User ID"
+    },
+    "plan_id": {
+      "type": "string",
+      "title": "Plan ID"
+    },
+    "plan_name": {
+      "type": "string",
+      "title": "Nome do Plano"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "trialing",
+        "active",
+        "past_due",
+        "cancelled",
+        "free"
+      ],
+      "default": "free"
+    },
+    "trial_start_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "In\u00edcio do Trial"
+    },
+    "trial_end_date": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Fim do Trial"
+    },
+    "current_period_start": {
+      "type": "string",
+      "format": "date-time",
+      "title": "In\u00edcio do Per\u00edodo"
+    },
+    "current_period_end": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Fim do Per\u00edodo"
+    },
+    "pagarme_subscription_id": {
+      "type": "string",
+      "title": "ID Pagar.me"
+    },
+    "pagarme_customer_id": {
+      "type": "string",
+      "title": "Customer ID Pagar.me"
+    },
+    "cancel_at_period_end": {
+      "type": "boolean",
+      "title": "Cancelar ao fim do per\u00edodo",
+      "default": false
+    },
+    "cancelled_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Cancelado em"
+    }
+  },
+  "required": [
+    "user_id",
+    "plan_id",
+    "status"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "WhatsAppChannel",
+  "type": "object",
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "title": "Workspace ID"
+    },
+    "nome": {
+      "type": "string",
+      "title": "Nome"
+    },
+    "instance_name": {
+      "type": "string",
+      "title": "Instance Name (Evolution)"
+    },
+    "instance_id": {
+      "type": "string",
+      "title": "Instance ID"
+    },
+    "token": {
+      "type": "string",
+      "title": "Token / API Key"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "conectado",
+        "desconectado"
+      ],
+      "default": "desconectado"
+    },
+    "owner_email": {
+      "type": "string",
+      "title": "Dono (email)"
+    },
+    "synced": {
+      "type": "boolean",
+      "title": "Sync inicial realizado",
+      "default": false
+    },
+    "phone_number": {
+      "type": "string",
+      "title": "N\u00famero conectado"
+    },
+    "profile_name": {
+      "type": "string",
+      "title": "Nome do perfil WhatsApp"
+    },
+    "profile_picture_url": {
+      "type": "string",
+      "title": "Foto do perfil WhatsApp"
+    }
+  },
+  "required": [
+    "nome",
+    "instance_name"
+  ]
+}

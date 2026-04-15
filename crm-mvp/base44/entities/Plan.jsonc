@@ -1,0 +1,60 @@
+{
+  "name": "Plan",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Nome do Plano"
+    },
+    "description": {
+      "type": "string",
+      "title": "Descri\u00e7\u00e3o"
+    },
+    "price_monthly": {
+      "type": "number",
+      "title": "Pre\u00e7o Mensal",
+      "default": 0
+    },
+    "contacts_limit": {
+      "type": "number",
+      "title": "Limite de Contatos",
+      "default": 0
+    },
+    "automations_limit": {
+      "type": "number",
+      "title": "Limite de Automa\u00e7\u00f5es",
+      "default": 0
+    },
+    "inbox_channels_limit": {
+      "type": "number",
+      "title": "Limite de Canais de Inbox",
+      "default": 0
+    },
+    "dispatches_limit_monthly": {
+      "type": "number",
+      "title": "Limite de Disparos Mensais",
+      "default": 0
+    },
+    "users_limit": {
+      "type": "number",
+      "title": "Limite de Usu\u00e1rios",
+      "default": 1
+    },
+    "features": {
+      "type": "array",
+      "title": "Funcionalidades Inclu\u00eddas",
+      "items": {
+        "type": "string"
+      }
+    },
+    "is_active": {
+      "type": "boolean",
+      "title": "Ativo",
+      "default": true
+    }
+  },
+  "required": [
+    "name",
+    "price_monthly"
+  ]
+}

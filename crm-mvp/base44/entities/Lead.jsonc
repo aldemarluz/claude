@@ -1,0 +1,82 @@
+{
+  "name": "Lead",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "name": {
+      "type": "string",
+      "title": "Nome"
+    },
+    "phone": {
+      "type": "string",
+      "title": "Telefone"
+    },
+    "email": {
+      "type": "string",
+      "title": "Email"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "novo",
+        "contato_iniciado",
+        "qualificado",
+        "proposta_enviada",
+        "fechado"
+      ],
+      "default": "novo"
+    },
+    "deal_status": {
+      "type": "string",
+      "title": "Status da Oportunidade",
+      "enum": [
+        "aberto",
+        "ganho",
+        "perdido",
+        "abandonado"
+      ],
+      "default": "aberto"
+    },
+    "origin": {
+      "type": "string",
+      "title": "Origem"
+    },
+    "tags": {
+      "type": "array",
+      "title": "Tags",
+      "items": {
+        "type": "string"
+      }
+    },
+    "estimated_value": {
+      "type": "number",
+      "title": "Valor Estimado",
+      "default": 0
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notas"
+    },
+    "company": {
+      "type": "string",
+      "title": "Empresa"
+    },
+    "assigned_to": {
+      "type": "string",
+      "title": "Respons\u00e1vel"
+    },
+    "custom_fields": {
+      "type": "object",
+      "title": "Campos Personalizados"
+    }
+  },
+  "required": [
+    "name",
+    "email",
+    "status"
+  ]
+}

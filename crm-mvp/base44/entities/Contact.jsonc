@@ -1,0 +1,59 @@
+{
+  "name": "Contact",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "name": {
+      "type": "string",
+      "title": "Nome"
+    },
+    "email": {
+      "type": "string",
+      "title": "Email"
+    },
+    "phone": {
+      "type": "string",
+      "title": "Telefone"
+    },
+    "company_id": {
+      "type": "string",
+      "title": "Empresa ID"
+    },
+    "company_name": {
+      "type": "string",
+      "title": "Empresa"
+    },
+    "tags": {
+      "type": "array",
+      "title": "Tags",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "ativo",
+        "inativo",
+        "prospect"
+      ],
+      "default": "ativo"
+    },
+    "notes": {
+      "type": "string",
+      "title": "Notas"
+    },
+    "lead_id": {
+      "type": "string",
+      "title": "Lead Vinculado"
+    }
+  },
+  "required": [
+    "name",
+    "email"
+  ]
+}

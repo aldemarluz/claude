@@ -1,0 +1,62 @@
+{
+  "name": "LandingPage",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "title": {
+      "type": "string",
+      "title": "T\u00edtulo"
+    },
+    "subtitle": {
+      "type": "string",
+      "title": "Subt\u00edtulo"
+    },
+    "body_text": {
+      "type": "string",
+      "title": "Texto"
+    },
+    "button_text": {
+      "type": "string",
+      "title": "Texto do Bot\u00e3o",
+      "default": "Enviar"
+    },
+    "slug": {
+      "type": "string",
+      "title": "Slug"
+    },
+    "is_active": {
+      "type": "boolean",
+      "title": "Ativa",
+      "default": true
+    },
+    "form_fields": {
+      "type": "array",
+      "title": "Campos do Formul\u00e1rio",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "name",
+        "email",
+        "phone"
+      ]
+    },
+    "background_color": {
+      "type": "string",
+      "title": "Cor de Fundo",
+      "default": "#1e293b"
+    },
+    "accent_color": {
+      "type": "string",
+      "title": "Cor de Destaque",
+      "default": "#3b82f6"
+    }
+  },
+  "required": [
+    "title",
+    "slug"
+  ]
+}

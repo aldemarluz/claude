@@ -1,0 +1,43 @@
+{
+  "name": "Interaction",
+  "type": "object",
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "lead_id": {
+      "type": "string",
+      "title": "Lead ID"
+    },
+    "type": {
+      "type": "string",
+      "title": "Tipo",
+      "enum": [
+        "note",
+        "email",
+        "whatsapp",
+        "call",
+        "status_change",
+        "automation"
+      ]
+    },
+    "content": {
+      "type": "string",
+      "title": "Conte\u00fado"
+    },
+    "from_status": {
+      "type": "string",
+      "title": "Status Anterior"
+    },
+    "to_status": {
+      "type": "string",
+      "title": "Novo Status"
+    }
+  },
+  "required": [
+    "lead_id",
+    "type",
+    "content"
+  ]
+}

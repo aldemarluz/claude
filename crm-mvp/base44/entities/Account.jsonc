@@ -1,0 +1,27 @@
+{
+  "name": "Account",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "title": "Nome da Conta"
+    },
+    "owner_email": {
+      "type": "string",
+      "title": "Email do Dono"
+    },
+    "plan": {
+      "type": "string",
+      "title": "Plano",
+      "default": "free"
+    },
+    "is_active": {
+      "type": "boolean",
+      "title": "Ativa",
+      "default": true
+    }
+  },
+  "required": [
+    "owner_email"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "Contract",
+  "type": "object",
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "title": "Workspace ID"
+    },
+    "title": {
+      "type": "string",
+      "title": "T\u00edtulo"
+    },
+    "proposal_id": {
+      "type": "string",
+      "title": "Proposta ID"
+    },
+    "client_name": {
+      "type": "string",
+      "title": "Nome do Cliente"
+    },
+    "content": {
+      "type": "string",
+      "title": "Conte\u00fado do Contrato"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "pendente",
+        "assinado"
+      ],
+      "default": "pendente"
+    },
+    "signed_at": {
+      "type": "string",
+      "title": "Assinado em",
+      "format": "date-time"
+    },
+    "value": {
+      "type": "number",
+      "title": "Valor",
+      "default": 0
+    },
+    "signature_image": {
+      "type": "string",
+      "title": "URL da Assinatura"
+    }
+  },
+  "required": [
+    "title",
+    "client_name",
+    "content"
+  ]
+}
