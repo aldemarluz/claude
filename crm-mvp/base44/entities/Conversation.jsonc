@@ -1,36 +1,120 @@
 {
   "name": "Conversation",
   "type": "object",
+  "description": "Omnichannel conversation. Each record ties one external endpoint (e.g. a WhatsApp phone) to one CRM contact and tracks the last-message state for the inbox.",
   "properties": {
-    "lead_id": {
+    "workspace_id": {
       "type": "string",
-      "title": "Lead ID"
+      "title": "Workspace ID"
     },
-    "lead_name": {
+    "account_id": {
       "type": "string",
-      "title": "Nome do Lead"
+      "title": "Account ID"
     },
-    "channel": {
+    "owner_email": {
+      "type": "string",
+      "title": "Conta Propriet\u00e1ria (email)"
+    },
+    "channel_type": {
       "type": "string",
       "title": "Canal",
       "enum": [
         "whatsapp",
-        "email"
+        "email",
+        "sms",
+        "instagram",
+        "messenger",
+        "tiktok",
+        "webchat"
       ],
       "default": "whatsapp"
     },
+    "channel_id": {
+      "type": "string",
+      "title": "Canal ID (WhatsAppChannel/\u2026)"
+    },
+    "external_id": {
+      "type": "string",
+      "title": "ID externo (phone/instagram id/\u2026)"
+    },
+    "contact_id": {
+      "type": "string",
+      "title": "Contact (CRM)"
+    },
+    "lead_id": {
+      "type": "string",
+      "title": "Lead ID (opcional)"
+    },
+    "lead_name": {
+      "type": "string",
+      "title": "Nome do Lead (cache)"
+    },
+    "contact_name": {
+      "type": "string",
+      "title": "Nome do Contato (cache)"
+    },
+    "contact_phone": {
+      "type": "string",
+      "title": "Telefone do Contato (cache)"
+    },
+    "profile_picture_url": {
+      "type": "string",
+      "title": "Foto do contato (cache)"
+    },
     "last_message": {
       "type": "string",
-      "title": "\u00daltima Mensagem"
+      "title": "\u00daltima mensagem"
+    },
+    "last_message_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Hor\u00e1rio da \u00faltima mensagem"
+    },
+    "last_direction": {
+      "type": "string",
+      "enum": [
+        "inbound",
+        "outbound"
+      ],
+      "title": "Dire\u00e7\u00e3o da \u00faltima mensagem"
+    },
+    "last_status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "sent",
+        "delivered",
+        "read",
+        "failed"
+      ],
+      "title": "Status da \u00faltima mensagem outbound"
     },
     "unread_count": {
       "type": "number",
-      "title": "N\u00e3o Lidas",
+      "title": "N\u00e3o lidas",
       "default": 0
+    },
+    "status": {
+      "type": "string",
+      "title": "Status da conversa",
+      "enum": [
+        "aberta",
+        "arquivada",
+        "fechada"
+      ],
+      "default": "aberta"
+    },
+    "assigned_to": {
+      "type": "string",
+      "title": "Respons\u00e1vel (email)"
+    },
+    "is_group": {
+      "type": "boolean",
+      "title": "\u00c9 grupo",
+      "default": false
     }
   },
   "required": [
-    "lead_id",
-    "lead_name"
+    "channel_type"
   ]
 }

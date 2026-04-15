@@ -1,7 +1,20 @@
 {
   "name": "Message",
   "type": "object",
+  "description": "Omnichannel message. Can belong to Conversation (generic) or a channel-specific conversation (WhatsAppConversation). Channel adapters write one Message per provider event.",
   "properties": {
+    "workspace_id": {
+      "type": "string",
+      "title": "Workspace ID"
+    },
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
+    "owner_email": {
+      "type": "string",
+      "title": "Conta Propriet\u00e1ria (email)"
+    },
     "conversation_id": {
       "type": "string",
       "title": "Conversa ID"
@@ -10,31 +23,107 @@
       "type": "string",
       "title": "Lead ID"
     },
+    "contact_id": {
+      "type": "string",
+      "title": "Contact ID"
+    },
+    "channel_type": {
+      "type": "string",
+      "title": "Canal",
+      "enum": [
+        "whatsapp",
+        "email",
+        "sms",
+        "instagram",
+        "messenger",
+        "tiktok",
+        "webchat"
+      ],
+      "default": "whatsapp"
+    },
+    "channel_id": {
+      "type": "string",
+      "title": "Canal ID"
+    },
+    "provider_message_id": {
+      "type": "string",
+      "title": "ID da mensagem (provedor)"
+    },
     "direction": {
       "type": "string",
       "title": "Dire\u00e7\u00e3o",
       "enum": [
-        "sent",
-        "received"
+        "inbound",
+        "outbound"
       ]
     },
     "content": {
       "type": "string",
       "title": "Conte\u00fado"
     },
-    "channel": {
+    "media_url": {
       "type": "string",
-      "title": "Canal",
+      "title": "URL da m\u00eddia"
+    },
+    "media_type": {
+      "type": "string",
+      "title": "Tipo de m\u00eddia",
       "enum": [
-        "whatsapp",
-        "email"
-      ]
+        "text",
+        "image",
+        "audio",
+        "video",
+        "document",
+        "sticker",
+        "location"
+      ],
+      "default": "text"
+    },
+    "media_mime": {
+      "type": "string",
+      "title": "MIME da m\u00eddia"
+    },
+    "media_size": {
+      "type": "number",
+      "title": "Tamanho da m\u00eddia (bytes)"
+    },
+    "file_name": {
+      "type": "string",
+      "title": "Nome do arquivo"
+    },
+    "status": {
+      "type": "string",
+      "title": "Status",
+      "enum": [
+        "pending",
+        "sent",
+        "delivered",
+        "read",
+        "failed"
+      ],
+      "default": "pending"
+    },
+    "error": {
+      "type": "string",
+      "title": "Erro do provedor (se falhou)"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Timestamp"
+    },
+    "is_automated": {
+      "type": "boolean",
+      "title": "Enviada por automa\u00e7\u00e3o",
+      "default": false
+    },
+    "automation_rule_id": {
+      "type": "string",
+      "title": "Automa\u00e7\u00e3o que disparou"
     }
   },
   "required": [
     "conversation_id",
-    "lead_id",
-    "direction",
-    "content"
+    "direction"
   ]
 }

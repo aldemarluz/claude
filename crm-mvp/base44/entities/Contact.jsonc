@@ -6,6 +6,10 @@
       "type": "string",
       "title": "Account ID"
     },
+    "workspace_id": {
+      "type": "string",
+      "title": "Workspace ID"
+    },
     "name": {
       "type": "string",
       "title": "Nome"
@@ -50,10 +54,38 @@
     "lead_id": {
       "type": "string",
       "title": "Lead Vinculado"
+    },
+    "origin": {
+      "type": "string",
+      "title": "Origem"
+    },
+    "last_contact": {
+      "type": "string",
+      "format": "date-time",
+      "title": "\u00daltimo contato"
+    },
+    "whatsapp_id": {
+      "type": "string",
+      "title": "WhatsApp Contact ID (link)"
+    },
+    "instagram_id": {
+      "type": "string",
+      "title": "Instagram ID"
+    },
+    "messenger_id": {
+      "type": "string",
+      "title": "Messenger ID"
+    },
+    "tiktok_id": {
+      "type": "string",
+      "title": "TikTok ID"
+    },
+    "profile_picture_url": {
+      "type": "string",
+      "title": "Foto de perfil (cache)"
     }
   },
   "required": [
-    "name",
-    "email"
+    "name"
   ]
 }

@@ -2,13 +2,30 @@
   "name": "WhatsAppConversation",
   "type": "object",
   "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
     "workspace_id": {
       "type": "string",
       "title": "Workspace ID"
     },
+    "channel_type": {
+      "type": "string",
+      "title": "Canal",
+      "default": "whatsapp"
+    },
     "contato_id": {
       "type": "string",
-      "title": "Contato ID"
+      "title": "Contato ID (WhatsAppContact)"
+    },
+    "contact_id": {
+      "type": "string",
+      "title": "Contact ID (CRM)"
+    },
+    "lead_id": {
+      "type": "string",
+      "title": "Lead ID"
     },
     "contato_nome": {
       "type": "string",
@@ -36,12 +53,37 @@
       "title": "Qtd. n\u00e3o lidas",
       "default": 0
     },
+    "last_message_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Hor\u00e1rio da \u00faltima mensagem"
+    },
+    "last_direction": {
+      "type": "string",
+      "enum": [
+        "inbound",
+        "outbound"
+      ],
+      "title": "Dire\u00e7\u00e3o da \u00faltima mensagem"
+    },
+    "last_status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "sent",
+        "delivered",
+        "read",
+        "failed"
+      ],
+      "title": "Status da \u00faltima mensagem"
+    },
     "status": {
       "type": "string",
       "title": "Status",
       "enum": [
         "aberta",
-        "fechada"
+        "fechada",
+        "arquivada"
       ],
       "default": "aberta"
     },

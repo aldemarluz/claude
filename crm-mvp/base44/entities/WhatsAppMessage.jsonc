@@ -10,6 +10,15 @@
       "type": "string",
       "title": "Workspace ID"
     },
+    "channel_type": {
+      "type": "string",
+      "title": "Canal",
+      "default": "whatsapp"
+    },
+    "channel_id": {
+      "type": "string",
+      "title": "Canal ID"
+    },
     "message_id": {
       "type": "string",
       "title": "ID da Mensagem (provedor)"
@@ -21,6 +30,10 @@
     "contato_id": {
       "type": "string",
       "title": "Contato ID"
+    },
+    "contact_id": {
+      "type": "string",
+      "title": "Contact ID (CRM)"
     },
     "direcao": {
       "type": "string",
@@ -47,9 +60,18 @@
         "audio",
         "video",
         "document",
+        "sticker",
         "text"
       ],
       "default": "text"
+    },
+    "media_mime": {
+      "type": "string",
+      "title": "MIME da m\u00eddia"
+    },
+    "media_size": {
+      "type": "number",
+      "title": "Tamanho da m\u00eddia (bytes)"
     },
     "file_name": {
       "type": "string",
@@ -64,15 +86,30 @@
       "type": "string",
       "title": "Status",
       "enum": [
+        "pending",
         "enviado",
         "entregue",
-        "lido"
+        "lido",
+        "falhou"
       ],
-      "default": "enviado"
+      "default": "pending"
+    },
+    "error": {
+      "type": "string",
+      "title": "Erro do provedor (se falhou)"
     },
     "owner_email": {
       "type": "string",
       "title": "Conta Propriet\u00e1ria (email)"
+    },
+    "is_automated": {
+      "type": "boolean",
+      "title": "Enviada por automa\u00e7\u00e3o",
+      "default": false
+    },
+    "automation_rule_id": {
+      "type": "string",
+      "title": "Automa\u00e7\u00e3o que disparou"
     }
   },
   "required": [
