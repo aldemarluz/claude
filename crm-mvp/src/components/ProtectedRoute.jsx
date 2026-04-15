@@ -9,28 +9,49 @@ const DefaultFallback = () => (
   </div>
 );
 
+/**
+ * Gate component that ensures the user is authenticated before rendering
+ * nested routes. Use as a pathless layout route in React Router:
+ *
+ *   <Route element={<ProtectedRoute />}>
+ *     <Route path="/dashboard" element={<Dashboard />} />
+ *   </Route>
+ *
+ * By default, unauthenticated users are redirected to the SDK login page;
+ * pass `unauthenticatedElement` to render something else instead.
+ */
 export default function ProtectedRoute({ fallback = <DefaultFallback />, unauthenticatedElement }) {
-  const { isAuthenticated, isLoadingAuth, authChecked, authError, checkUserAuth } = useAuth();
+  const {
+    isAuthenticated,
+    isLoadingAuth,
+    isLoadingPublicSettings,
+    authError,
+    navigateToLogin,
+  } = useAuth();
+
+  const shouldRedirect =
+    !isLoadingAuth &&
+    !isLoadingPublicSettings &&
+    !isAuthenticated &&
+    authError?.type !== 'user_not_registered' &&
+    !unauthenticatedElement;
 
   useEffect(() => {
-    if (!authChecked && !isLoadingAuth) {
-      checkUserAuth();
+    if (shouldRedirect) {
+      navigateToLogin();
     }
-  }, [authChecked, isLoadingAuth, checkUserAuth]);
+  }, [shouldRedirect, navigateToLogin]);
 
-  if (isLoadingAuth || !authChecked) {
+  if (isLoadingAuth || isLoadingPublicSettings) {
     return fallback;
   }
 
-  if (authError) {
-    if (authError.type === 'user_not_registered') {
-      return <UserNotRegisteredError />;
-    }
-    return unauthenticatedElement;
+  if (authError?.type === 'user_not_registered') {
+    return <UserNotRegisteredError />;
   }
 
   if (!isAuthenticated) {
-    return unauthenticatedElement;
+    return unauthenticatedElement ?? fallback;
   }
 
   return <Outlet />;
