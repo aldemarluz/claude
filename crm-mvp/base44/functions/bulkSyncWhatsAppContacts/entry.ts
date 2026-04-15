@@ -1,54 +1,80 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.26';
 
+/**
+ * Mirror existing WhatsAppContacts into CRM Contacts for a given workspace.
+ * Safe to re-run: NEVER deletes existing Contacts, NEVER fabricates fake
+ * emails, NEVER touches contacts from other tenants.
+ *
+ * Input: { workspace_id?: string }
+ *   - If omitted, falls back to the caller's owner_email scope.
+ */
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
-    
-    if (!user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // First, clear all contacts with tag "whatsapp" that have generated emails
-    try {
-      const allContacts = await base44.entities.Contact.list("-updated_date", 1000);
-      for (const contact of allContacts) {
-        if (contact.tags?.includes("whatsapp") && contact.email?.includes("@whatsapp.local")) {
-          await base44.entities.Contact.delete(contact.id);
-        }
-      }
-    } catch (_) {}
+    const body = await req.json().catch(() => ({} as any));
+    const workspace_id: string | null = body?.workspace_id || null;
 
-    // Fetch all WhatsApp contacts from WhatsAppContact entity
-    const waContacts = await base44.entities.WhatsAppContact.list("-criado_em", 500);
-    
+    const tenantFilter: Record<string, string> = workspace_id
+      ? { workspace_id }
+      : { owner_email: user.email };
+
+    const waContacts = await base44.asServiceRole.entities.WhatsAppContact.filter(tenantFilter, '-criado_em', 1000);
+
     let synced = 0;
+    let skipped = 0;
 
     for (const wc of waContacts) {
-      // Skip invalid entries
-      if (!wc.nome || !wc.telefone) continue;
-      if (typeof wc.telefone === 'string' && wc.telefone.includes('@g.us')) continue;
-
       try {
-        // Create new contact
-        await base44.entities.Contact.create({
-          name: String(wc.nome),
-          phone: String(wc.telefone),
-          email: `${wc.telefone}@whatsapp.local`,
-          status: "ativo",
-          tags: ["whatsapp"],
-          workspace_id: wc.workspace_id || "",
+        if (!wc.telefone) { skipped++; continue; }
+        if (String(wc.telefone).includes('@g.us')) { skipped++; continue; }
+        if (wc.is_group) { skipped++; continue; }
+        const phone = String(wc.telefone).replace(/\D/g, '');
+        if (!phone) { skipped++; continue; }
+
+        const accountFilter = workspace_id ? { account_id: workspace_id } : {};
+        const existing = await base44.asServiceRole.entities.Contact.filter({ ...accountFilter, phone });
+
+        if (existing.length > 0) {
+          const c = existing[0];
+          const updates: Record<string, unknown> = {};
+          if (!c.whatsapp_id) updates.whatsapp_id = wc.id;
+          if (!c.profile_picture_url && wc.profile_picture_url) updates.profile_picture_url = wc.profile_picture_url;
+          if (!c.origin) updates.origin = 'WhatsApp';
+          if (Object.keys(updates).length > 0) {
+            await base44.asServiceRole.entities.Contact.update(c.id, updates);
+          }
+          if (!wc.crm_contact_id) {
+            await base44.asServiceRole.entities.WhatsAppContact.update(wc.id, { crm_contact_id: c.id }).catch(() => null);
+          }
+          skipped++;
+          continue;
+        }
+
+        const created = await base44.asServiceRole.entities.Contact.create({
+          name: String(wc.nome || phone),
+          phone,
+          account_id: workspace_id || null,
+          workspace_id: workspace_id || null,
+          status: 'ativo',
+          tags: ['whatsapp'],
+          origin: 'WhatsApp',
+          whatsapp_id: wc.id,
+          profile_picture_url: wc.profile_picture_url || null,
         });
+        await base44.asServiceRole.entities.WhatsAppContact.update(wc.id, { crm_contact_id: created.id }).catch(() => null);
         synced++;
-      } catch (_) {}
+      } catch (err) {
+        console.error('[bulkSync] entry failed:', (err as Error).message);
+        skipped++;
+      }
     }
 
-    return Response.json({ 
-      message: 'Sincronização concluída',
-      synced,
-      total: waContacts.length
-    });
+    return Response.json({ ok: true, synced, skipped, total: waContacts.length });
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    console.error('[bulkSyncWhatsAppContacts] Erro:', (error as Error).message);
+    return Response.json({ error: 'Internal error' }, { status: 500 });
   }
 });

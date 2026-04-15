@@ -61,29 +61,65 @@ Deno.serve(async (req) => {
       // Small delay to avoid rate limiting
       await sleep(150);
 
-      // Find or create contact
-      const existingContacts = workspace_id
-        ? await base44.asServiceRole.entities.WhatsAppContact.filter({ telefone: phone, workspace_id })
-        : await base44.asServiceRole.entities.WhatsAppContact.filter({ telefone: phone, owner_email });
+      // Find or create WhatsAppContact (tenant-scoped, group-aware).
+      const findKey = isGroup ? { group_jid: phone } : { telefone: phone };
+      const tenantFilter = workspace_id ? { workspace_id } : { owner_email };
+      const existingContacts = await base44.asServiceRole.entities.WhatsAppContact.filter({ ...tenantFilter, ...findKey });
 
       let contact;
       if (existingContacts.length === 0) {
         contact = await base44.asServiceRole.entities.WhatsAppContact.create({
-          nome: chatName, telefone: phone, owner_email, workspace_id,
+          nome: chatName,
+          telefone: phone,
+          owner_email,
+          workspace_id,
+          group_jid: isGroup ? phone : null,
+          is_group: isGroup,
           profile_picture_url: profilePicUrl,
-          profile_pic_updated_at: new Date().toISOString(),
+          profile_pic_updated_at: profilePicUrl ? new Date().toISOString() : null,
           criado_em: new Date().toISOString(),
         });
         contacts_synced++;
       } else {
         contact = existingContacts[0];
-        // Update name/pic if missing
         const updates = {};
         if (!contact.nome || contact.nome === contact.telefone) updates.nome = chatName;
         if (profilePicUrl && !contact.profile_picture_url) updates.profile_picture_url = profilePicUrl;
         if (Object.keys(updates).length > 0) {
           await base44.asServiceRole.entities.WhatsAppContact.update(contact.id, updates);
           contact = { ...contact, ...updates };
+        }
+      }
+
+      // Mirror to CRM Contact (only for 1-to-1, never for groups, never with fake email).
+      if (!isGroup && phone && !contact.crm_contact_id) {
+        try {
+          const accountFilter = workspace_id ? { account_id: workspace_id } : {};
+          const crmExisting = await base44.asServiceRole.entities.Contact.filter({ ...accountFilter, phone });
+          if (crmExisting.length > 0) {
+            const c = crmExisting[0];
+            if (!c.whatsapp_id) {
+              await base44.asServiceRole.entities.Contact.update(c.id, { whatsapp_id: contact.id });
+            }
+            await base44.asServiceRole.entities.WhatsAppContact.update(contact.id, { crm_contact_id: c.id });
+            contact.crm_contact_id = c.id;
+          } else {
+            const created = await base44.asServiceRole.entities.Contact.create({
+              name: chatName,
+              phone,
+              account_id: workspace_id || null,
+              workspace_id: workspace_id || null,
+              status: 'ativo',
+              tags: ['whatsapp'],
+              origin: 'WhatsApp',
+              whatsapp_id: contact.id,
+              profile_picture_url: profilePicUrl || null,
+            });
+            await base44.asServiceRole.entities.WhatsAppContact.update(contact.id, { crm_contact_id: created.id });
+            contact.crm_contact_id = created.id;
+          }
+        } catch (mirrorErr) {
+          console.error('[sync] CRM mirror failed:', (mirrorErr as Error).message);
         }
       }
 
@@ -97,11 +133,14 @@ Deno.serve(async (req) => {
       if (existingConvs.length === 0) {
         await base44.asServiceRole.entities.WhatsAppConversation.create({
           contato_id: contact.id,
+          contact_id: contact.crm_contact_id || null,
           contato_nome: chatName,
           contato_telefone: phone,
           canal_id: ch.id,
+          channel_type: 'whatsapp',
           owner_email, workspace_id,
           ultima_mensagem: lastMsg,
+          last_message_at: chat.updatedAt || new Date().toISOString(),
           profile_picture_url: profilePicUrl,
           is_group: isGroup,
           nao_lido: false,
