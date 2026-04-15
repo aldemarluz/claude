@@ -1,175 +1,190 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.26';
 
-// runAutomations: called by evolutionWebhook after saving each message
-// Checks all active AutomationRules for the workspace and executes matching ones
+// ── Text utilities ─────────────────────────────────────────────────────────
+const norm = (s: unknown): string =>
+  String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 
+const splitKeywords = (raw: unknown): string[] =>
+  String(raw || '')
+    .split(/[|,;\n]/)
+    .map((k) => norm(k))
+    .filter(Boolean);
+
+const renderTemplate = (tpl: string, vars: Record<string, string | null | undefined>): string =>
+  String(tpl || '').replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => String(vars[key] ?? ''));
+
+// ── Handler ────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({} as any));
     const {
-      workspace_id,
-      owner_email,
-      phone,
-      contact_name,
-      message_text,
-      conversation_id,
-      contact_id,
-      is_first_message,
-      from_me,
-      channel_id,
+      workspace_id, owner_email, phone, contact_name, message_text,
+      conversation_id, contact_id, crm_contact_id,
+      is_first_message, is_group, from_me, channel_id, channel_type,
     } = body;
 
     if (from_me) return Response.json({ ok: true, skipped: 'from_me' });
 
-    const EVOLUTION_URL = (Deno.env.get('EVOLUTION_URL') || '').replace(/\/$/, '');
-    const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API_KEY');
-
-    const ruleFilter = workspace_id
-      ? { is_active: true, workspace_id }
-      : owner_email ? { is_active: true, owner_email } : { is_active: true };
-
+    const ruleFilter: Record<string, unknown> = { is_active: true };
+    if (workspace_id) ruleFilter.workspace_id = workspace_id;
+    else if (owner_email) ruleFilter.owner_email = owner_email;
     let rules = await base44.asServiceRole.entities.AutomationRule.filter(ruleFilter);
     if (rules.length === 0 && workspace_id) {
       rules = await base44.asServiceRole.entities.AutomationRule.filter({ is_active: true, account_id: workspace_id });
     }
-
     if (rules.length === 0) return Response.json({ ok: true, no_rules: true });
 
-    const results = [];
+    const normalizedText = norm(message_text);
+    const results: Array<Record<string, unknown>> = [];
 
     for (const rule of rules) {
       let matched = false;
-
       switch (rule.trigger) {
         case 'first_message':
           matched = is_first_message === true;
           break;
         case 'message_received':
-          matched = true;
+        case 'whatsapp_received':
+          matched = !is_group;
           break;
         case 'message_contains': {
-          const keywords = (rule.trigger_value || '').split('|').map(k => k.trim().toLowerCase()).filter(Boolean);
-          const text = (message_text || '').toLowerCase();
-          matched = keywords.some(kw => text.includes(kw));
+          const keywords = splitKeywords(rule.trigger_value);
+          matched = keywords.some((kw) => normalizedText.includes(kw));
           break;
         }
         case 'lead_created':
           matched = is_first_message === true;
           break;
+        case 'no_response':
         default:
           matched = false;
       }
-
       if (!matched) continue;
+
+      // Idempotency for first_message rules: only fire once per conversation.
+      if (rule.trigger === 'first_message') {
+        try {
+          const recent = await base44.asServiceRole.entities.WhatsAppMessage.filter({
+            conversa_id: conversation_id,
+            automation_rule_id: rule.id,
+          }, '-timestamp', 1);
+          if (recent.length > 0) {
+            results.push({ rule: rule.name, status: 'already_fired_first_message' });
+            continue;
+          }
+        } catch { /* best-effort */ }
+      }
+
+      const tplVars = {
+        nome: contact_name || '',
+        telefone: phone || '',
+        empresa: '',
+        primeira_mensagem: message_text || '',
+      };
 
       try {
         switch (rule.action) {
           case 'send_whatsapp': {
-            if (!conversation_id || !rule.action_value) break;
+            if (!conversation_id || !rule.action_value) {
+              results.push({ rule: rule.name, status: 'noop', reason: 'missing_target' });
+              break;
+            }
+            const text = renderTemplate(rule.action_value, tplVars);
+            try {
+              await base44.asServiceRole.functions.invoke('sendWhatsAppMessage', {
+                conversation_id,
+                mensagem: text,
+                media_type: 'text',
+                is_automated: true,
+                automation_rule_id: rule.id,
+              });
+              results.push({ rule: rule.name, action: 'send_whatsapp', status: 'queued' });
+            } catch (e) {
+              results.push({ rule: rule.name, action: 'send_whatsapp', status: 'failed', error: (e as Error).message });
+            }
+            break;
+          }
 
-            let msg = rule.action_value;
-            msg = msg.replace(/\{\{nome\}\}/gi, contact_name || '');
-            msg = msg.replace(/\{\{telefone\}\}/gi, phone || '');
-            msg = msg.replace(/\{\{empresa\}\}/gi, '');
-
-            const channels = channel_id
-              ? await base44.asServiceRole.entities.WhatsAppChannel.filter({ id: channel_id, status: 'conectado' })
-              : workspace_id
-                ? await base44.asServiceRole.entities.WhatsAppChannel.filter({ status: 'conectado', workspace_id })
-                : await base44.asServiceRole.entities.WhatsAppChannel.filter({ status: 'conectado', owner_email });
-
-            if (channels.length > 0) {
-              const canal = channels[0];
-              const instanceName = canal.instance_name || canal.instance_id;
-              const cleanPhone = (phone || '').replace(/\D/g, '');
-
-              if (cleanPhone) {
-                await new Promise(r => setTimeout(r, 1500));
-
-                const evoRes = await fetch(`${EVOLUTION_URL}/message/sendText/${instanceName}`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
-                  body: JSON.stringify({ number: cleanPhone, text: msg }),
-                });
-
-                if (evoRes.ok) {
-                  await base44.asServiceRole.entities.WhatsAppMessage.create({
-                    conversa_id: conversation_id,
-                    contato_id: contact_id,
-                    direcao: 'outbound',
-                    conteudo: msg,
-                    media_type: 'text',
-                    timestamp: new Date().toISOString(),
-                    status: 'enviado',
-                    owner_email,
-                    workspace_id,
-                  });
-
-                  await base44.asServiceRole.entities.WhatsAppConversation.update(conversation_id, {
-                    ultima_mensagem: msg,
-                    atualizado_em: new Date().toISOString(),
-                  });
-
-                  results.push({ rule: rule.name, action: 'send_whatsapp', status: 'sent' });
-                } else {
-                  const err = await evoRes.text();
-                  results.push({ rule: rule.name, action: 'send_whatsapp', status: 'failed', error: err });
-                }
-              }
+          case 'send_email': {
+            if (!rule.action_value) { results.push({ rule: rule.name, status: 'noop' }); break; }
+            const targetEmail = await resolveLeadEmail(base44, { workspace_id, phone, crm_contact_id });
+            if (!targetEmail) { results.push({ rule: rule.name, status: 'no_email' }); break; }
+            const subject = String(rule.trigger_value || 'Mensagem').slice(0, 160);
+            const html = renderTemplate(rule.action_value, tplVars);
+            try {
+              await base44.asServiceRole.functions.invoke('sendTransactionalEmail', {
+                to: targetEmail,
+                subject,
+                html,
+                template: 'automation',
+                workspace_id,
+              });
+              results.push({ rule: rule.name, action: 'send_email', status: 'queued' });
+            } catch (e) {
+              results.push({ rule: rule.name, action: 'send_email', status: 'failed', error: (e as Error).message });
             }
             break;
           }
 
           case 'add_tag': {
             if (!rule.action_value) break;
-            const tag = rule.action_value.trim();
-            const leads = await base44.asServiceRole.entities.Lead.filter(
-              workspace_id ? { phone, workspace_id } : { phone }
-            );
-            if (leads.length > 0) {
-              const lead = leads[0];
+            const tag = String(rule.action_value).trim();
+            const lead = await findOrCreateLead(base44, { workspace_id, phone, contact_name, createIfMissing: false });
+            if (lead) {
               const currentTags = lead.tags || [];
               if (!currentTags.includes(tag)) {
                 await base44.asServiceRole.entities.Lead.update(lead.id, { tags: [...currentTags, tag] });
                 results.push({ rule: rule.name, action: 'add_tag', status: 'added', tag });
+              } else {
+                results.push({ rule: rule.name, action: 'add_tag', status: 'already_present' });
               }
+            } else {
+              results.push({ rule: rule.name, action: 'add_tag', status: 'no_lead' });
             }
             break;
           }
 
           case 'change_status': {
             if (!rule.action_value) break;
-            const leads = await base44.asServiceRole.entities.Lead.filter(
-              workspace_id ? { phone, workspace_id } : { phone }
-            );
-            if (leads.length > 0) {
-              await base44.asServiceRole.entities.Lead.update(leads[0].id, { status: rule.action_value });
+            const lead = await findOrCreateLead(base44, { workspace_id, phone, contact_name, createIfMissing: false });
+            if (lead) {
+              await base44.asServiceRole.entities.Lead.update(lead.id, { status: rule.action_value });
               results.push({ rule: rule.name, action: 'change_status', status: 'changed' });
+            } else {
+              results.push({ rule: rule.name, action: 'change_status', status: 'no_lead' });
             }
             break;
           }
 
           case 'create_lead': {
-            if (!phone) break;
-            const existing = await base44.asServiceRole.entities.Lead.filter(
-              workspace_id ? { phone, workspace_id } : { phone }
-            );
-            if (existing.length === 0) {
-              await base44.asServiceRole.entities.Lead.create({
-                name: contact_name || phone,
-                phone,
-                email: '',
-                status: 'novo',
-                deal_status: 'aberto',
-                origin: 'WhatsApp',
-                workspace_id: workspace_id || null,
-                tags: ['whatsapp-auto'],
-              });
-              results.push({ rule: rule.name, action: 'create_lead', status: 'created' });
-            } else {
-              results.push({ rule: rule.name, action: 'create_lead', status: 'already_exists' });
+            const lead = await findOrCreateLead(base44, { workspace_id, phone, contact_name, createIfMissing: true });
+            results.push({ rule: rule.name, action: 'create_lead', status: lead ? 'created_or_existing' : 'failed' });
+            break;
+          }
+
+          case 'assign_lead': {
+            if (!rule.action_value) break;
+            const lead = await findOrCreateLead(base44, { workspace_id, phone, contact_name, createIfMissing: false });
+            if (lead) {
+              await base44.asServiceRole.entities.Lead.update(lead.id, { assigned_to: rule.action_value });
+              results.push({ rule: rule.name, action: 'assign_lead', status: 'assigned' });
             }
+            break;
+          }
+
+          case 'notify_team': {
+            console.log(`[runAutomations] notify_team rule="${rule.name}"`);
+            results.push({ rule: rule.name, action: 'notify_team', status: 'logged' });
+            break;
+          }
+
+          case 'wait': {
+            results.push({ rule: rule.name, action: 'wait', status: 'not_implemented' });
             break;
           }
 
@@ -181,17 +196,59 @@ Deno.serve(async (req) => {
           executions: (rule.executions || 0) + 1,
           last_executed_at: new Date().toISOString(),
         });
-
       } catch (actionError) {
-        console.error(`[runAutomations] Error executing rule "${rule.name}":`, actionError.message);
-        results.push({ rule: rule.name, status: 'error', error: actionError.message });
+        console.error(`[runAutomations] rule "${rule.name}" failed:`, (actionError as Error).message);
+        results.push({ rule: rule.name, status: 'error', error: (actionError as Error).message });
       }
     }
 
-    console.log('[runAutomations] Results:', JSON.stringify(results));
-    return Response.json({ ok: true, results });
+    return Response.json({ ok: true, count: results.length, results });
   } catch (error) {
-    console.error('[runAutomations] Error:', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    console.error('[runAutomations] Error:', (error as Error).message);
+    return Response.json({ error: 'Internal error' }, { status: 500 });
   }
 });
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+async function findOrCreateLead(
+  base44: any,
+  args: { workspace_id?: string; phone?: string; contact_name?: string; createIfMissing: boolean },
+): Promise<any | null> {
+  const { workspace_id, phone, contact_name, createIfMissing } = args;
+  if (!phone) return null;
+  const filter: Record<string, string> = { phone };
+  if (workspace_id) filter.account_id = workspace_id;
+  const found = await base44.asServiceRole.entities.Lead.filter(filter);
+  if (found.length > 0) return found[0];
+  if (!createIfMissing) return null;
+  return await base44.asServiceRole.entities.Lead.create({
+    name: contact_name || phone,
+    phone,
+    email: '',
+    status: 'novo',
+    deal_status: 'aberto',
+    origin: 'WhatsApp',
+    account_id: workspace_id || null,
+    workspace_id: workspace_id || null,
+    tags: ['whatsapp-auto'],
+  });
+}
+
+async function resolveLeadEmail(
+  base44: any,
+  args: { workspace_id?: string; phone?: string; crm_contact_id?: string | null },
+): Promise<string | null> {
+  if (args.crm_contact_id) {
+    try {
+      const contacts = await base44.asServiceRole.entities.Contact.filter({ id: args.crm_contact_id });
+      if (contacts[0]?.email) return contacts[0].email;
+    } catch { /* ignore */ }
+  }
+  if (args.phone) {
+    const f: Record<string, string> = { phone: args.phone };
+    if (args.workspace_id) f.account_id = args.workspace_id;
+    const leads = await base44.asServiceRole.entities.Lead.filter(f);
+    if (leads[0]?.email) return leads[0].email;
+  }
+  return null;
+}
