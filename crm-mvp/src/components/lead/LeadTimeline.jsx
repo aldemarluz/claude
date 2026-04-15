@@ -1,5 +1,5 @@
 import moment from "moment";
-import { MessageSquare, Mail, Phone, Tag, ArrowRight, StickyNote, Zap, Check, Bell, RefreshCw, Users } from "lucide-react";
+import { MessageSquare, Mail, Phone, ArrowRight, StickyNote, Zap, Check, Bell, RefreshCw, Users } from "lucide-react";
 
 const iconMap = {
   note: StickyNote,

@@ -1,4 +1,4 @@
-import { FileText, Play, Download } from "lucide-react";
+import { FileText, Download } from "lucide-react";
 
 export default function MediaMessage({ msg }) {
   const { media_type, media_url, conteudo, file_name } = msg;

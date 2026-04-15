@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2, ChevronDown, Link } from "lucide-react";
+import { Trash2, ChevronDown } from "lucide-react";
 
 const NODE_TYPES = {
   trigger: {

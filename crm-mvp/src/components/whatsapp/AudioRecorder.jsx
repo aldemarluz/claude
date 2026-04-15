@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Mic, Square, Send, Trash2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import { toast } from "sonner";
 
 export default function AudioRecorder({ onSend, disabled }) {
   const [state, setState] = useState("idle"); // idle | recording | preview

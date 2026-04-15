@@ -1,4 +1,3 @@
-import moment from "moment";
 
 function getInitials(name) {
   if (!name) return "?";

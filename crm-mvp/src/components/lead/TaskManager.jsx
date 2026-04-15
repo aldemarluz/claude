@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Check, Trash2, Clock, Bell, Phone, Users, RefreshCw, CalendarDays } from "lucide-react";
+import { Plus, Check, Trash2, Bell, Phone, Users, RefreshCw, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
 import moment from "moment";
 

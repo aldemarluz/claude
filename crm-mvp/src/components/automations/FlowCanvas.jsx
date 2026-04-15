@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback } from "react";
 import FlowNode from "./FlowNode";
-import { Plus } from "lucide-react";
 
 export default function FlowCanvas({ nodes, onAddNode, onUpdateNode, onDeleteNode, onConnect }) {
   const canvasRef = useRef(null);

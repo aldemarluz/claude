@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Send, Mail, ChevronDown, ChevronUp, Bold, Italic, List, AlertCircle, Paperclip, X } from "lucide-react";
+import { Send, ChevronDown, ChevronUp, Bold, Italic, List, AlertCircle, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const PRIORITY_OPTIONS = [
