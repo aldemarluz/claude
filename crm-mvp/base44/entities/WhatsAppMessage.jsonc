@@ -6,6 +6,14 @@
       "type": "string",
       "title": "Account ID"
     },
+    "workspace_id": {
+      "type": "string",
+      "title": "Workspace ID"
+    },
+    "message_id": {
+      "type": "string",
+      "title": "ID da Mensagem (provedor)"
+    },
     "conversa_id": {
       "type": "string",
       "title": "Conversa ID"

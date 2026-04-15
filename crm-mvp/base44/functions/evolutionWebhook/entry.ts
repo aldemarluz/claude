@@ -1,48 +1,110 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 
+const timingSafeEqual = (a: string, b: string): boolean => {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+};
+
+async function hmacSha256Hex(secret: string, data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Verify the webhook came from Evolution API.
+ *
+ * Evolution API commonly authenticates webhooks via a static API key header
+ * (`apikey`) or a shared secret HMAC (`X-Hub-Signature-256` style). At least
+ * one must be configured — otherwise we refuse the request.
+ */
+async function verifyEvolutionSignature(req: Request, rawBody: string): Promise<boolean> {
+  const sharedSecret = Deno.env.get('EVOLUTION_WEBHOOK_SECRET');
+  const staticToken = Deno.env.get('EVOLUTION_WEBHOOK_TOKEN');
+
+  if (!sharedSecret && !staticToken) {
+    console.error('[evolutionWebhook] No EVOLUTION_WEBHOOK_SECRET or EVOLUTION_WEBHOOK_TOKEN configured; rejecting request.');
+    return false;
+  }
+
+  if (staticToken) {
+    const header = req.headers.get('apikey') || req.headers.get('authorization') || '';
+    const provided = header.replace(/^Bearer\s+/i, '').trim();
+    if (provided && timingSafeEqual(provided, staticToken)) return true;
+  }
+
+  if (sharedSecret) {
+    const provided = (req.headers.get('x-hub-signature-256') || req.headers.get('x-signature') || '')
+      .replace(/^sha256=/i, '')
+      .trim();
+    if (provided) {
+      const expected = await hmacSha256Hex(sharedSecret, rawBody);
+      if (timingSafeEqual(provided.toLowerCase(), expected.toLowerCase())) return true;
+    }
+  }
+
+  return false;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
 
   try {
+    const rawBody = await req.text();
+    const authorized = await verifyEvolutionSignature(req, rawBody);
+    if (!authorized) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+
     const base44 = createClientFromRequest(req);
-    const body = await req.json();
     const event = body.event || '';
     const instanceName = body.instance;
 
-    console.log('[evolutionWebhook] event:', event, 'instance:', instanceName);
-
     const EVOLUTION_URL = (Deno.env.get('EVOLUTION_URL') || '').replace(/\/$/, '');
     const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API_KEY');
-    const evoHeaders = { 'apikey': EVOLUTION_API_KEY, 'Content-Type': 'application/json' };
+    const evoHeaders = { 'apikey': EVOLUTION_API_KEY || '', 'Content-Type': 'application/json' };
 
     // ── CONNECTION UPDATE ──────────────────────────────────────────────────
     if (event === 'connection.update' || event === 'CONNECTION_UPDATE') {
       const state = body.data?.state || '';
-      const wuid = body.data?.wuid || null; // número conectado: "5527999881234@s.whatsapp.net"
+      const wuid = body.data?.wuid || null;
       const profileName = body.data?.profileName || null;
 
       const channels = await base44.asServiceRole.entities.WhatsAppChannel.filter({ instance_name: instanceName });
       if (channels.length > 0) {
         const ch = channels[0];
         const newStatus = state === 'open' ? 'conectado' : 'desconectado';
-        const updates = {};
+        const updates: Record<string, unknown> = {};
         if (ch.status !== newStatus) updates.status = newStatus;
         if (state === 'open' && wuid) {
-          updates.phone_number = wuid.replace('@s.whatsapp.net', '');
+          updates.phone_number = String(wuid).replace('@s.whatsapp.net', '');
         }
         if (state === 'open' && profileName && !ch.profile_name) {
           updates.profile_name = profileName;
         }
         if (Object.keys(updates).length > 0) {
           await base44.asServiceRole.entities.WhatsAppChannel.update(ch.id, updates);
-          console.log('[evolutionWebhook] channel updated:', updates);
         }
-        // Trigger initial sync on first connection
         if (state === 'open' && !ch.synced) {
-          console.log('[evolutionWebhook] triggering initial sync...');
-          base44.asServiceRole.functions.invoke('syncWhatsAppContacts', { channel_id: ch.id }).catch(e => {
-            console.error('[evolutionWebhook] sync trigger error:', e.message);
-          });
+          base44.asServiceRole.functions
+            .invoke('syncWhatsAppContacts', { channel_id: ch.id })
+            .catch((e: Error) => console.error('[evolutionWebhook] sync trigger error:', e.message));
         }
       }
       return Response.json({ ok: true });
@@ -52,11 +114,18 @@ Deno.serve(async (req) => {
     if (event === 'messages.update' || event === 'MESSAGES_UPDATE') {
       const updates = Array.isArray(body.data) ? body.data : [body.data];
       for (const upd of updates) {
-        const statusMap = { 2: 'enviado', 3: 'entregue', 4: 'lido' };
+        const statusMap: Record<number, string> = { 2: 'enviado', 3: 'entregue', 4: 'lido' };
         const newStatus = statusMap[upd?.update?.status];
         if (!newStatus || !upd?.key?.id) continue;
-        // Try to find messages by conversa to update status — best effort
-        console.log('[evolutionWebhook] message status update:', upd.key.id, '->', newStatus);
+        // Best-effort: update our WhatsAppMessage by provider message_id.
+        try {
+          const msgs = await base44.asServiceRole.entities.WhatsAppMessage.filter({ message_id: upd.key.id });
+          for (const m of msgs) {
+            await base44.asServiceRole.entities.WhatsAppMessage.update(m.id, { status: newStatus });
+          }
+        } catch (err) {
+          console.error('[evolutionWebhook] update status error:', (err as Error).message);
+        }
       }
       return Response.json({ ok: true });
     }
@@ -70,21 +139,31 @@ Deno.serve(async (req) => {
     if (!msgData) return Response.json({ ok: true, skipped: 'no_data' });
 
     const remoteJid = msgData.key?.remoteJid || '';
-    const isGroup = remoteJid.includes('@g.us');
-    const phone = isGroup ? remoteJid : remoteJid.replace('@s.whatsapp.net', '');
+    const isGroup = String(remoteJid).includes('@g.us');
+    const phone = isGroup ? remoteJid : String(remoteJid).replace('@s.whatsapp.net', '');
     if (!phone) return Response.json({ ok: true, skipped: 'no_phone' });
 
+    const providerMessageId = msgData.key?.id || null;
     const fromMe = msgData.key?.fromMe || false;
-    const timestamp = msgData.messageTimestamp
-      ? new Date(msgData.messageTimestamp * 1000).toISOString()
+    const tsRaw = Number(msgData.messageTimestamp);
+    const timestamp = Number.isFinite(tsRaw) && tsRaw > 0
+      ? new Date(tsRaw * 1000).toISOString()
       : new Date().toISOString();
 
-    // Extract message content
+    // Idempotency.
+    if (providerMessageId) {
+      const existing = await base44.asServiceRole.entities.WhatsAppMessage.filter({ message_id: providerMessageId });
+      if (existing.length > 0) {
+        return Response.json({ ok: true, deduped: true });
+      }
+    }
+
+    // Extract message content.
     const msg = msgData.message || {};
     let conteudo = '';
-    let media_url = null;
+    let media_url: string | null = null;
     let media_type = 'text';
-    let file_name = null;
+    let file_name: string | null = null;
 
     if (msg.conversation) {
       conteudo = msg.conversation;
@@ -115,58 +194,65 @@ Deno.serve(async (req) => {
       conteudo = '[Mensagem]';
     }
 
-    // Find channel by instance name
+    // Find channel by instance name — this is our source of tenancy.
     const channels = await base44.asServiceRole.entities.WhatsAppChannel.filter({ instance_name: instanceName });
     const canal_id = channels.length > 0 ? channels[0].id : null;
     const owner_email = channels.length > 0 ? (channels[0].owner_email || null) : null;
     const workspace_id = channels.length > 0 ? (channels[0].workspace_id || null) : null;
 
+    // Require at least some tenant context to avoid cross-tenant leaks.
+    if (!workspace_id && !owner_email) {
+      console.error('[evolutionWebhook] Refusing to write: no workspace_id/owner_email for instance', instanceName);
+      return Response.json({ ok: true, skipped: 'no_tenant' });
+    }
+
+    const tenantFilter: Record<string, string> = {};
+    if (workspace_id) tenantFilter.workspace_id = workspace_id;
+    if (owner_email) tenantFilter.owner_email = owner_email;
+
     const pushName = msgData.pushName || null;
 
-    // For fromMe messages, "phone" is the remoteJid (the recipient)
-    // Find or create contact
-    const contactFilter = workspace_id
-      ? { telefone: phone, workspace_id }
-      : owner_email ? { telefone: phone, owner_email } : { telefone: phone };
-
-    let contacts = await base44.asServiceRole.entities.WhatsAppContact.filter(contactFilter);
+    // Find or create contact.
+    let contacts = await base44.asServiceRole.entities.WhatsAppContact.filter({
+      ...tenantFilter,
+      telefone: phone,
+    });
     let contact;
 
     if (contacts.length === 0) {
       const nome = pushName || phone;
-      let profilePicUrl = null;
+      let profilePicUrl: string | null = null;
       if (!fromMe) {
-        // Only fetch profile pic for inbound — for outbound we don't know the pic
         profilePicUrl = await fetchProfilePic(EVOLUTION_URL, evoHeaders, instanceName, phone);
       }
 
       contact = await base44.asServiceRole.entities.WhatsAppContact.create({
         nome,
         telefone: phone,
-        owner_email,
-        workspace_id,
+        ...tenantFilter,
         profile_picture_url: profilePicUrl,
         profile_pic_updated_at: profilePicUrl ? new Date().toISOString() : null,
         criado_em: new Date().toISOString(),
       });
 
-      // Try to link to CRM contact by phone
       try {
-        const crmFilter = workspace_id ? { phone, workspace_id } : { phone };
-        const crmContacts = await base44.asServiceRole.entities.Contact.filter(crmFilter);
+        const crmContacts = await base44.asServiceRole.entities.Contact.filter({
+          ...(workspace_id ? { account_id: workspace_id } : {}),
+          phone,
+        });
         if (crmContacts.length > 0) {
           await base44.asServiceRole.entities.WhatsAppContact.update(contact.id, { crm_contact_id: crmContacts[0].id });
           contact = { ...contact, crm_contact_id: crmContacts[0].id };
         }
-      } catch (_) {}
-
+      } catch (err) {
+        console.error('[evolutionWebhook] CRM link failed:', (err as Error).message);
+      }
     } else {
       contact = contacts[0];
-      const updates = {};
+      const updates: Record<string, unknown> = {};
 
       if (pushName && pushName !== contact.nome && !isGroup && !fromMe) updates.nome = pushName;
 
-      // Refresh profile picture if older than 24h (only for inbound)
       if (!fromMe) {
         const picAge = contact.profile_pic_updated_at
           ? (Date.now() - new Date(contact.profile_pic_updated_at).getTime()) / 3600000
@@ -186,12 +272,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Find or create conversation
-    const convFilter = workspace_id
-      ? { contato_id: contact.id, workspace_id }
-      : owner_email ? { contato_id: contact.id, owner_email } : { contato_id: contact.id };
-
-    let convs = await base44.asServiceRole.entities.WhatsAppConversation.filter(convFilter);
+    // Find or create conversation.
+    let convs = await base44.asServiceRole.entities.WhatsAppConversation.filter({
+      ...tenantFilter,
+      contato_id: contact.id,
+    });
     let conversa;
 
     if (convs.length === 0) {
@@ -200,8 +285,7 @@ Deno.serve(async (req) => {
         contato_nome: contact.nome,
         contato_telefone: phone,
         canal_id,
-        owner_email,
-        workspace_id,
+        ...tenantFilter,
         ultima_mensagem: conteudo,
         nao_lido: !fromMe,
         unread_count: fromMe ? 0 : 1,
@@ -213,7 +297,7 @@ Deno.serve(async (req) => {
       });
     } else {
       conversa = convs[0];
-      const updateData = {
+      const updateData: Record<string, unknown> = {
         ultima_mensagem: conteudo,
         atualizado_em: new Date().toISOString(),
       };
@@ -228,7 +312,7 @@ Deno.serve(async (req) => {
       await base44.asServiceRole.entities.WhatsAppConversation.update(conversa.id, updateData);
     }
 
-    // Save message
+    // Save message.
     await base44.asServiceRole.entities.WhatsAppMessage.create({
       conversa_id: conversa.id,
       contato_id: contact.id,
@@ -239,56 +323,64 @@ Deno.serve(async (req) => {
       file_name,
       timestamp,
       status: fromMe ? 'enviado' : 'entregue',
-      owner_email,
-      workspace_id,
+      message_id: providerMessageId,
+      ...tenantFilter,
     });
-
-    console.log('[evolutionWebhook] message saved from', phone, 'fromMe:', fromMe);
 
     // ── TRIGGER AUTOMATIONS (inbound only) ───────────────────────────────
     if (!fromMe) {
-      const isFirstMessage = convs.length === 0; // conversation was just created
-      base44.asServiceRole.functions.invoke('runAutomations', {
-        workspace_id,
-        owner_email,
-        phone,
-        contact_name: contact.nome || null,
-        message_text: conteudo,
-        conversation_id: conversa.id,
-        contact_id: contact.id,
-        is_first_message: isFirstMessage,
-        from_me: false,
-        channel_id: canal_id,
-      }).catch(e => console.error('[evolutionWebhook] runAutomations error:', e.message));
+      const isFirstMessage = convs.length === 0;
+      base44.asServiceRole.functions
+        .invoke('runAutomations', {
+          workspace_id,
+          owner_email,
+          phone,
+          contact_name: contact.nome || null,
+          message_text: conteudo,
+          conversation_id: conversa.id,
+          contact_id: contact.id,
+          is_first_message: isFirstMessage,
+          from_me: false,
+          channel_id: canal_id,
+        })
+        .catch((e: Error) => console.error('[evolutionWebhook] runAutomations error:', e.message));
     }
 
     return Response.json({ ok: true });
   } catch (error) {
-    console.error('[evolutionWebhook] Erro:', error.message);
-    return Response.json({ error: error.message }, { status: 500 });
+    console.error('[evolutionWebhook] Erro:', (error as Error).message);
+    return Response.json({ error: 'Internal error' }, { status: 500 });
   }
 });
 
 // Helper: fetch profile picture URL
-async function fetchProfilePic(EVOLUTION_URL, headers, instanceName, phone) {
+async function fetchProfilePic(EVOLUTION_URL: string, headers: Record<string, string>, instanceName: string, phone: string): Promise<string | null> {
   try {
     const res = await fetch(`${EVOLUTION_URL}/chat/fetchProfilePictureUrl/${instanceName}`, {
-      method: 'POST', headers,
+      method: 'POST',
+      headers,
       body: JSON.stringify({ number: phone }),
     });
     if (res.ok) {
       const data = await res.json();
       return data?.profilePictureUrl || data?.picture || null;
     }
-  } catch (_) {}
+  } catch (_) { /* ignore */ }
   return null;
 }
 
 // Helper: download media from Evolution, upload to Base44 storage, return URL
-async function downloadMedia(EVOLUTION_URL, headers, instanceName, msgData, base44Client) {
+async function downloadMedia(
+  EVOLUTION_URL: string,
+  headers: Record<string, string>,
+  instanceName: string,
+  msgData: any,
+  base44Client: any,
+): Promise<string | null> {
   try {
     const res = await fetch(`${EVOLUTION_URL}/chat/getBase64FromMediaMessage/${instanceName}`, {
-      method: 'POST', headers,
+      method: 'POST',
+      headers,
       body: JSON.stringify({ message: { key: msgData.key, message: msgData.message } }),
     });
     if (!res.ok) return null;
@@ -297,7 +389,6 @@ async function downloadMedia(EVOLUTION_URL, headers, instanceName, msgData, base
     const mime = data?.mimetype || 'application/octet-stream';
     if (!base64) return null;
 
-    // Convert base64 to binary and upload
     const byteString = atob(base64);
     const byteArray = new Uint8Array(byteString.length);
     for (let i = 0; i < byteString.length; i++) byteArray[i] = byteString.charCodeAt(i);
@@ -308,7 +399,7 @@ async function downloadMedia(EVOLUTION_URL, headers, instanceName, msgData, base
     const uploadResult = await base44Client.asServiceRole.integrations.Core.UploadFile({ file });
     return uploadResult?.file_url || null;
   } catch (e) {
-    console.error('[evolutionWebhook] downloadMedia error:', e.message);
+    console.error('[evolutionWebhook] downloadMedia error:', (e as Error).message);
     return null;
   }
 }
