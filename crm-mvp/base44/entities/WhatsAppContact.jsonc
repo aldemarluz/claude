@@ -2,9 +2,18 @@
   "name": "WhatsAppContact",
   "type": "object",
   "properties": {
+    "account_id": {
+      "type": "string",
+      "title": "Account ID"
+    },
     "workspace_id": {
       "type": "string",
       "title": "Workspace ID"
+    },
+    "channel_type": {
+      "type": "string",
+      "title": "Canal",
+      "default": "whatsapp"
     },
     "nome": {
       "type": "string",
@@ -13,6 +22,15 @@
     "telefone": {
       "type": "string",
       "title": "Telefone"
+    },
+    "group_jid": {
+      "type": "string",
+      "title": "JID do Grupo (se grupo)"
+    },
+    "is_group": {
+      "type": "boolean",
+      "title": "\u00c9 grupo",
+      "default": false
     },
     "owner_email": {
       "type": "string",
@@ -38,7 +56,6 @@
     }
   },
   "required": [
-    "nome",
     "telefone"
   ]
 }
